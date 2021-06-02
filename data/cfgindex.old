@@ -1,52 +1,53 @@
 <!DOCTYPE html>
-<html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-        <meta name="description" content="Wificfg setup framework" />
-        <meta name="author" content="Jordan Rubin" />
-        <title>ESP32 Network Configuration Page</title>
-        <link href="css/styles.css" rel="stylesheet" />
-    </head>
-    <body class="bg-primary" onload="updateWifiList();">
-      <div id="wificonfigsetup">
-        <div id="wifimain_content">
-            <main>
-              <div class="container">
-                <div class="row justify-content-center">
-                    <div class="col-lg-5">
-                      <div class="card shadow-lg border-0 rounded-lg mt-5">
-                        <div class="card-header"><h3 class="text-center font-weight-light my-4">Wireless Network Configuration</h3></div>
-                        <div class="card-body">
-                          <div class="form-floating mb-3">
-                            <button type="button" id="refreshButton" onclick="updateWifiList()"> Refresh</button>
-                        </div> 
-                        <div class="form-floating mb-3">
-                          <select id="Wifilist" onchange="selectChange()">
-                          </select>
-                        </div>
-                        <div id = keySection> 
-                          <div class="form-floating mb-3">
-                            <div class="spinner-border text-primary" id="spinner" crole="status"></div>
-                          </div>
-                          <div class="form-floating mb-3">
-                            Key: <input type="password" id="keyfield" size="30" maxlength="30"><br>
-                            <input type="checkbox" onclick="showPass()">Show Password
-                          </div> 
-                          <div class="form-floating mb-3">
-                            <button type="button" id="connectButton" onclick="connectWifi()">Connect</button>
-                          </div> 
-                        </div>
-                        </div>
-                      </div>
-                    </div>
-                </div>
-              </div>
-      </main>
-  </div>
-</div>
-<script>
+<html>
+  <head>
+    <title>ESP32 Network Configuration Page</title>
+    <meta charset=utf-8" http-equiv="Content-Type">
+    <link rel="stylesheet" href="mystyle.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
+  <body onload="updateWifiList();">
+  <table class="mytable">
+  <tr>
+    <td>
+      <font size=4><b><u>Wireless Network Configuration</b></font> 
+    </td>
+    <td>
+     <button type="button" id="refreshButton" onclick="updateWifiList()"> Refresh</button>
+    </td>  
+  </tr>
+  <tr>
+    <td colspan=2>
+      <select id="Wifilist" onchange="selectChange()">
+      </select>
+    </td>
+  </tr>
+  <tr>
+    <td colspan=2>  
+      <table id = "keySection" border =0>
+        <tr>
+          <td colspan =2>
+            <center><div id="spinner" class="loader"></div></center><BR>
+            Key:
+            <input type="password" id="keyfield" size="30" maxlength="30"><br>
+            <input type="checkbox" onclick="showPass()">Show Password 
+          </td>
+        </tr>
+        <tr>
+          <td colspan =2>
+            <button type="button" id="connectButton" onclick="connectWifi()">Connect</button>
+          </td>
+        </tr>
+      </table>
+      </td>
+    </tr>
+    <tr>
+      <td colspan=2>
+        <center><a href="http://technocoma.blogspot.com">technocoma.blogspot.com</a></center>
+      </td>
+    </tr>
+  </table>
+  <script>
 ///////////////////////////////// connectWifi()  Connection request routine
     function connectWifi(){
        var dropdown = document.getElementById('Wifilist');
@@ -85,6 +86,7 @@
       xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
       xhr.send("ssidval="+ssid+"&keyval="+key+"");   
     }
+///////////////////////////////////////////////////////////////////
 
 ///////////////////////////////// selectChange()  Dynamic select box functions  
     function selectChange() {
@@ -112,6 +114,7 @@
         x.type = "password";
       }
     } 
+///////////////////////////////////////////////////////////////////
 
 ///////////////////////////////// updateWifilist()  Dynamic refresh of SSIDs  
     function updateWifiList() {
@@ -145,6 +148,7 @@
       xhr.open("GET", "getWifiList", true);
       xhr.send();
     }
+///////////////////////////////////////////////////////////////////
   </script>
   </body>
 </html>

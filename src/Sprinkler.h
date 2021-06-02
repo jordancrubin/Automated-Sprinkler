@@ -43,7 +43,6 @@ class Zone {
     void factoryDefaultChk();
     bool meterMoved(void); 
     void openZone(const char*); 
-    void readConfigFile(char*, const char*, const char*);
     double readMeter(char);
     double readMeter(void);
     void removeZone(const char*);
@@ -55,6 +54,7 @@ class Zone {
     int valveMaxTravelTime(void);
     void valveMaxTravelTime(int);
     const char* valvePosition(void);
+    void writeConfigFile(char*, const char*, const char*);
     void zoneInfo();
     void zoneInfo(const char*);
 
