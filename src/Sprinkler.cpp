@@ -7,7 +7,6 @@
 */
 #include <Arduino.h>
 #include <Sprinkler.h>
-//#include <SPIFFS.h>
 
 //CONSTRUCTOR -----------------------------------------------------------------]
 //SPRINKLERSYSTEM SPRINKLERSYSTEM(int statusled, int facdefPin)
@@ -50,7 +49,7 @@ void SPRINKLERSYSTEM::addValve(int relaygpio, int opengpio, int closedgpio, bool
 // FUNCTION - [addZone] - [Returns the current version from the Object---------]
 void SPRINKLERSYSTEM::addZone(int gpio, const char* zonename){
   if (strlen(zonename) > 25){
-    Serial.println(F("addZone::Zone Name limited to 25 Characters"));
+    Serial.println(F("addZone::Zone Name 25 Char limit"));
     return;
   }  
   for(int i=0; i< maxZones; i++){
@@ -106,12 +105,13 @@ void SPRINKLERSYSTEM::factoryDefaultChk(){
     double now = millis();
     while (digitalRead(FACDEFPIN)){
       if ((millis()-now) >= FACDEFDELAY){
-        Serial.println(F("Defaulting Security!!!"));
-        Serial.println(F("Removing network configs"));
+        Serial.println(F("Defaulting unit!"));
         SPIFFS.remove("/network.cnf");
         SPIFFS.remove("/testresult.cnf");
         SPIFFS.remove("/testnetwork.cnf");
-        Serial.println("Rebooting....");
+        SPIFFS.remove("configuration.json");
+        SPIFFS.remove("/accounts.cnf");
+        Serial.println("Restart....");
         this->statusLedBlink(30,20);
         ESP.restart();
         break;
@@ -137,7 +137,7 @@ int SPRINKLERSYSTEM::getIndex(const char* name){
 
 // PRIVATE - [getIndex] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx---------]
 int SPRINKLERSYSTEM::getIndex(int gpio){
-  int returnIndex = 99;
+  int returnIndex = 99; // try -1
   for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
     if(storedZones[i]){
       if (storedZones[i]->gpio == gpio){ 
@@ -164,44 +164,17 @@ void SPRINKLERSYSTEM::openZone(const char* name){
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [readConfigFile] - [Returns key pair values from cfg files-------]
-void SPRINKLERSYSTEM::readConfigFile(char* value, const char* filename, const char* parameter){
-  char B;
-  File file = SPIFFS.open(filename);
-  if (file){  
-    char filebuf[80];
-    int chr = 0;
-      while(file.available()){    
-         B = file.read();
-         if ((chr == 0) && ((B == ' ')||(B == '#'))){continue;}              
-         if ((B =='\r') || (B == '\n')){
-           filebuf[chr] = '\0';
-           char * p = strstr(filebuf,parameter);          
-           if(p) {
-             chr = 0;
-             byte read =0;
-             for (int q=0; q < strlen(p); q++){
-                 if (read == 0){
-                    if(p[q] != 61){continue;}
-                    else {
-                      read = 1; continue;
-                    }
-                 }
-                 value[chr] = p[q];
-                 chr++;
-             }
-             value[chr] = '\0';            
-             break;
-           }
-           chr = 0;
-         }
-     filebuf[chr] = B;
-     chr++;
-     }
-  }
-  file.close();
+// FUNCTION - [writeConfigFile] - [Adds or updates key pair values in cfg files-]
+void SPRINKLERSYSTEM::writeConfigFile(char* value, const char* filename, const char* parameter){
+Serial.print("param is");
+Serial.println(parameter);
+
+
+
+
+
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------]
 
 // FUNCTION - [readmeter] - [Returns the current version from the Object--------]
 double SPRINKLERSYSTEM::readMeter(void){
