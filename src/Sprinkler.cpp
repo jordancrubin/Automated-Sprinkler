@@ -34,7 +34,7 @@ SPRINKLERSYSTEM::Zone::Zone(int pin, const char* name)
 // FUNCTION - [addMeter] - [Returns the current version from the Object--------]
 void SPRINKLERSYSTEM::addMeter(int gpioPin, bool usePullup, char measure, long debounceDelay, bool useSpiffs, double increment, bool verbose){
   //WATERMETER WATERMETER(SignalGPIOpin,useInternalPullupResistor,measure[g|l],metervalue)
-  flowmeter = new WATERMETER(gpioPin,usePullup,measure,debounceDelay,useSpiffs,increment,verbose);
+  flowmeter = new WATERMETER(gpioPin,usePullup,measure,debounceDelay,useSpiffs,increment);
   flowmeter->setMeter(32.2);
   Serial.println(flowmeter->initFilesys());
 }
@@ -81,7 +81,7 @@ void SPRINKLERSYSTEM::addZone(int gpio, const char* zonename){
 // FUNCTION - [meterMoved] - [Returns the current version from the Object------]
 bool SPRINKLERSYSTEM::meterMoved(void){
   bool status;
-  status = flowmeter->checkUpdate();
+  status = flowmeter->updated();
   return status;
 }
  // ----------------------------------------------------------------------------] 
@@ -122,7 +122,7 @@ void SPRINKLERSYSTEM::factoryDefaultChk(){
 
 // PRIVATE - [getIndex] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx---------]
 int SPRINKLERSYSTEM::getIndex(const char* name){
-  int returnIndex = 99;
+  int returnIndex = 99; // try -1
   for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
     if(storedZones[i]){
       if (strcmp(storedZones[i]->thisname,name)==0){ 

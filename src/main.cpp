@@ -94,10 +94,10 @@ void readConfigFile(char* value, const char* filename, const char* parameter){
 // ----------------------------------------------------------------------------] 
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[is_authenticated]-------------------------------------------]
+//-FUNCTION-[isAut]------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
-bool is_authenticated(AsyncWebServerRequest *request) {
-  Serial.println("In is_authenticated");
+bool isAuth(AsyncWebServerRequest *request) {
+  Serial.println("In isAuth");
   if (request->hasHeader("Cookie")) {
     Serial.print("Cookie: ");
     String cookie = request->header("Cookie");
@@ -128,8 +128,8 @@ bool is_authenticated(AsyncWebServerRequest *request) {
     String token = sha1(String(cookieUser) + ":" +      
     String(convFilePwd) + ":" + 
     request->client()->remoteIP().toString());
-    if (cookie.indexOf("ESPSESSIONID=" + token) != -1) {
-      Serial.println("Auth pass");
+    if (cookie.indexOf("SESSIONID=" + token) != -1) {
+      Serial.println(F("Auth pass"));
       return true;
     }
   }
@@ -144,7 +144,7 @@ bool is_authenticated(AsyncWebServerRequest *request) {
 bool handleFileRead(AsyncWebServerRequest *request, String path) {
   Serial.print(F("handleFileRead: "));
   Serial.println(path);
-  if (!is_authenticated(request)) {
+  if (!isAuth(request)) {
     Serial.println(F("->login"));
     path = "/login.html";
   } 
@@ -167,7 +167,8 @@ bool handleFileRead(AsyncWebServerRequest *request, String path) {
       if (!SPIFFS.exists("/system.cnf")){
         request->redirect("/configure.html?newcnf=1");
       }
-    }  
+    }
+    //response->addHeader("Cache-Control", "no-cache");  
     Serial.print("Path-> ");
     Serial.println(path);
     request->send(response);
@@ -202,7 +203,7 @@ void handleNotFound(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 void handleLogin(AsyncWebServerRequest *request) {
   Serial.println("handleLogin");
-  String msg;
+  //String msg;
   if (request->hasHeader("Cookie")) {
     // Print cookies
     //Serial.print("Found cookie: ");
@@ -216,9 +217,10 @@ void handleLogin(AsyncWebServerRequest *request) {
   }
   String user = request->arg("username");
   if (user.length()<1){
-    msg = "Provide username/password! try again.";
+    //msg="e1";
     AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
-    response->addHeader("Location", "/login.html?msg=" + msg);
+    response->addHeader("Location", "/login.html?msg=e1");
+    //response->addHeader("Location", "/login.html?msg=" + msg);
     response->addHeader("Cache-Control", "no-cache");
     request->send(response);
     return;
@@ -238,15 +240,16 @@ void handleLogin(AsyncWebServerRequest *request) {
       String token = sha1(request->arg("username") + ":" + convFilePwd + ":" + request->client()->remoteIP().toString());
       //Serial.print("Token: ");
       Serial.println(token);
-      response->addHeader("Set-Cookie", "ESPSESSIONID=" + token);
+      response->addHeader("Set-Cookie", "SESSIONID=" + token);
       response->addHeader("Set-Cookie", "USER=" + request->arg("username"));
       request->send(response);
       //Serial.println("Login Success");
       return;
     }
-    msg = "Wrong username/password! try again.";
+    //msg = "Wrong username/password! try again.";
     AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
-    response->addHeader("Location", "/login.html?msg=" + msg);
+    //response->addHeader("Location", "/login.html?msg=" + msg);
+    response->addHeader("Location", "/login.html?msg=e2");
     response->addHeader("Cache-Control", "no-cache");
     request->send(response);
     return;
@@ -262,7 +265,7 @@ void handleLogout(AsyncWebServerRequest *request) {
   AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
   response->addHeader("Location", "/login.html?msg=User disconnected");
   response->addHeader("Cache-Control", "no-cache");
-  response->addHeader("Set-Cookie", "ESPSESSIONID=0");
+  response->addHeader("Set-Cookie", "SESSIONID=0");
   request->send(response);
   return;
 }
@@ -280,12 +283,12 @@ void handleCfgRoot(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleCheckStatus]------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleCheckStatus(AsyncWebServerRequest *request) {
-    char result[30];
+    char result[20];
     readConfigFile(result,"/testresult.cnf","CONN");       
-    Serial.print(F("CONN -> ")); Serial.println(result);
+    Serial.print(F("CONN-> ")); Serial.println(result);
     request->send(200, "text/html", result);
     if (strcmp(result,"SUCCESS") == 0){
-      Serial.println(F("Reboot to normal op."));
+      Serial.println(F("Reboot to normal op"));
       ESP.restart();
     }
 }
@@ -360,31 +363,18 @@ void serverRouting() {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[stringToarray]----------------------------------------------]
-//////////////////////////////////////////////////////////////////////////
-void stringToarray (char * convstr, String input) {
-   int str_len = input.length() + 1; 
-   input.toCharArray(convstr, str_len);   
-}
-//-----------------------------------------------------------------------]
-
-//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handleWifiConnect]------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
-void handleWifiConnect(AsyncWebServerRequest *request) {  
-  AsyncWebParameter* p = request->getParam(0);
-  char ssid[50];
-  char password[75];
-  stringToarray(ssid, p->value());
-  p = request->getParam(1);
-  stringToarray(password, p->value());
+void handleWifiConnect(AsyncWebServerRequest *request) { 
   File testfile = SPIFFS.open("/testnetwork.cnf","w");
   if (!testfile){
       Serial.print(F("open testnetwork file err"));
       return;  
   }
-  testfile.print("{\"SSID\":\""); testfile.print(ssid);
-  testfile.print("\",\"PASSWORD\":\""); testfile.print(password); testfile.print("\"}"); 
+  AsyncWebParameter* p = request->getParam(0);
+  testfile.print("{\"SSID\":\""); testfile.print(p->value().c_str());
+  p = request->getParam(1);
+  testfile.print("\",\"PASSWORD\":\""); testfile.print(p->value().c_str()); testfile.print("\"}"); 
   testfile.close();
   request->send(200, "text/html", "RCVD"); 
   startup();
@@ -422,7 +412,7 @@ void configNetwork() {
   if (SPIFFS.exists("/testnetwork.cnf")){
     char ssid[50]; 
     readConfigFile(ssid,"/testnetwork.cnf","SSID");         
-    Serial.print(F("Attempt with SSID -> ")); Serial.println(ssid);
+    Serial.print(F("Try with SSID-> ")); Serial.println(ssid);
     char key[50];
     readConfigFile(key,"/testnetwork.cnf","PASSWORD");
     if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
@@ -523,11 +513,11 @@ void startup(){
   acctMgr("inspect","admin","0");
   //sprinklersystem.acctMgr("inspect","admin","0");
   if (SPIFFS.exists("/network.cnf")){
-     Serial.println("NETWORK: Already configured, Loading......");
+     Serial.println("NETWORK: Already configured, Loading");
      loadNetwork();
   }
   else {
-     Serial.println("NETWORK: Setting up for initial config.....");   
+     Serial.println("NETWORK: Setting up for initial config");   
      configNetwork();    
   }
   server.on("/getWifiList",  HTTP_GET, handleWifiList);
@@ -535,7 +525,7 @@ void startup(){
   server.on("/checkStatus",  HTTP_GET, handleCheckStatus); 
   serverRouting();
   server.begin();
-  Serial.print("WEBSVR:  Running on port ");Serial.println(WEBSERVPORT);
+  Serial.print("WEBSVR:  Port ");Serial.println(WEBSERVPORT);
 }
 //-----------------------------------------------------------------------]
 
@@ -544,7 +534,7 @@ void startup(){
 //////////////////////////////////////////////////////////////////////////
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n\n***Rubin Projects Boot Framework***\n   technocoma.blogspot.com 2021\n");
+  Serial.println(F("\n\n***Rubin Projects Boot Framework***\n   technocoma.blogspot.com 2021\n"));
   if(!sprinklersystem.startSpiffFs()){
       Serial.println("SPIFFS: Mount err.");
       return;

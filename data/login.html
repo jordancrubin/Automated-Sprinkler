@@ -63,18 +63,11 @@
         <script src="js/scripts.js"></script>
     </body>
     <script>
-        function getURLParameter(sParam){
-            var sPageURL = window.location.search.substring(1);
-            var sURLVariables = sPageURL.split('&');
-            for (var i = 0; i < sURLVariables.length; i++){
-                var sParameterName = sURLVariables[i].split('=');
-                if (sParameterName[0] == sParam){
-                    return sParameterName[1];
-                }
-            }
-        }
         if (getURLParameter("msg")) {
-            alert(decodeURI(getURLParameter("msg")));
+            var out;
+            if (getURLParameter("msg") == "e1"){out = "Provide username/password! try again.";}
+            if (getURLParameter("msg") == "e2"){out = "Wrong username/password! try again.";}
+            alert(out);
         }
-        </script>
+    </script>
 </html>
