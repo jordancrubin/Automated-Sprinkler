@@ -24,7 +24,6 @@ const char* deviceName = "sprinkler32";  //Mdns name sprinkler32.local
 
 AsyncWebServer server(WEBSERVPORT);
 SPRINKLERSYSTEM sprinklersystem(2,23,5000);
-
 WiFiUDP wifiUdp;
 NTP ntp(wifiUdp);
 void startup();                         // Pre-declaration for simplicity
@@ -73,7 +72,30 @@ void cookieParser(char (& Array)[4][70],  const char * input){
        returnSlot[count] = '\0'; 
     }
   }
-  return;
+  //return;
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[getCookieUser]----------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void getCookieUser(char * output, const char * input){ 
+    char fString[4][70];   
+    cookieParser(fString,input);
+    char *cookieuser[10];
+    for (auto val : fString) {
+      if (strncmp("USER=",val,5) == 0){ 
+        char *ptr = NULL;
+        byte index = 0; 
+        ptr = strtok(val, "=");
+        while(ptr != NULL){
+          cookieuser[index] = ptr;
+          index++;
+          ptr = strtok(NULL, "=");  // delimiters
+        }
+      }  
+    }
+    strcpy(output,cookieuser[1]);
 }
 //-----------------------------------------------------------------------]
 
@@ -93,6 +115,58 @@ void readConfigFile(char* value, const char* filename, const char* parameter){
 }
 // ----------------------------------------------------------------------------] 
 
+// FUNCTION - [writeConfigFile] - [Adds or updates key pair values in cfg files-]
+void writeConfigFile(char* value, const char* filename, const char* parameter){
+  File file = SPIFFS.open(filename);
+  if (file){
+    DynamicJsonDocument doc(1024);
+    deserializeJson(doc, file);
+    file.close();
+    if (doc.containsKey(value)) {
+    doc[value] = parameter;
+    File resultfile = SPIFFS.open(filename,"w");
+    serializeJson(doc, resultfile);
+    }  
+  }
+  file.close();
+}
+// ----------------------------------------------------------------------------]
+
+// FUNCTION - [loadConfig] - [Returns the current version from the Object--------]
+void loadConfig(){
+Serial.print(F("LOADCFG: "));
+  File file = SPIFFS.open("/system.cnf");
+//while (file.available()) {
+//    Serial.write(file.read());
+//}
+//file.close();
+//  file = SPIFFS.open("/system.cnf");
+  DynamicJsonDocument doc(1024);
+  deserializeJson(doc, file);
+  file.close();
+  const char* mtrio = doc["mtrio"];
+  const char* meas = doc["meas"];
+  const char* deb = doc["mtrdeb"];
+  const char* inc = doc["mtrinc"];
+  sprinklersystem.addMeter(atoi(mtrio),1,meas[0],atoi(deb),1,atof(inc));
+  const char* valopio = doc["valopio"];
+  const char* valclio = doc["valclio"];
+  const char* valrlyio = doc["valrlyio"];
+  sprinklersystem.addValve(atoi(valrlyio),atoi(valopio),atoi(valclio),1);
+  JsonArray arr = doc["zones"].as<JsonArray>();
+  for (JsonVariant value : arr) {
+    JsonArray thiszone = value;
+    const char * gpio = thiszone.getElement(0);
+    const char * name = thiszone.getElement(1);
+    const char * desc = thiszone.getElement(2);
+    char* newname = strdup(name);
+    char* newdesc = strdup(desc);
+    sprinklersystem.addZone(atoi(gpio),newname);
+    sprinklersystem.setDescription(name,newdesc);
+  }
+}
+// ----------------------------------------------------------------------------]
+
 //////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[isAut]------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
@@ -102,29 +176,16 @@ bool isAuth(AsyncWebServerRequest *request) {
     Serial.print("Cookie: ");
     String cookie = request->header("Cookie");
     Serial.println(cookie);
-    char fString[4][70];   
-    cookieParser(fString,cookie.c_str());
-    char *cookieuser[10];
-    for (auto val : fString) {
-      if (strncmp("USER=",val,5) == 0){ 
-        char *ptr = NULL;
-        byte index = 0; 
-        ptr = strtok(val, "=");
-        while(ptr != NULL){
-          cookieuser[index] = ptr;
-          index++;
-          ptr = strtok(NULL, "=");  // delimiters
-        }
-      }  
-    }
-    Serial.print("USER ");    
-    Serial.println(cookieuser[1]);
+    char user[20];
+    getCookieUser(user,request->header("Cookie").c_str());
+    Serial.print("USER ");  
+    Serial.println(user); 
     char filepwd[50];
-    readConfigFile(filepwd,"/accounts.cnf",cookieuser[1]);
+    readConfigFile(filepwd,"/accounts.cnf",user);
     Serial.print("PWD ");
     String convFilePwd = filepwd;
     Serial.println(convFilePwd);
-    String cookieUser = cookieuser[1];
+    String cookieUser = user;
     String token = sha1(String(cookieUser) + ":" +      
     String(convFilePwd) + ":" + 
     request->client()->remoteIP().toString());
@@ -168,7 +229,7 @@ bool handleFileRead(AsyncWebServerRequest *request, String path) {
         request->redirect("/configure.html?newcnf=1");
       }
     }
-    //response->addHeader("Cache-Control", "no-cache");  
+    response->addHeader("Cache-Control", "no-cache");  
     Serial.print("Path-> ");
     Serial.println(path);
     request->send(response);
@@ -203,9 +264,7 @@ void handleNotFound(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 void handleLogin(AsyncWebServerRequest *request) {
   Serial.println("handleLogin");
-  //String msg;
   if (request->hasHeader("Cookie")) {
-    // Print cookies
     //Serial.print("Found cookie: ");
     String cookie = request->header("Cookie");
     Serial.println(cookie);
@@ -217,10 +276,8 @@ void handleLogin(AsyncWebServerRequest *request) {
   }
   String user = request->arg("username");
   if (user.length()<1){
-    //msg="e1";
     AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
     response->addHeader("Location", "/login.html?msg=e1");
-    //response->addHeader("Location", "/login.html?msg=" + msg);
     response->addHeader("Cache-Control", "no-cache");
     request->send(response);
     return;
@@ -246,9 +303,7 @@ void handleLogin(AsyncWebServerRequest *request) {
       //Serial.println("Login Success");
       return;
     }
-    //msg = "Wrong username/password! try again.";
     AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
-    //response->addHeader("Location", "/login.html?msg=" + msg);
     response->addHeader("Location", "/login.html?msg=e2");
     response->addHeader("Cache-Control", "no-cache");
     request->send(response);
@@ -261,7 +316,7 @@ void handleLogin(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleLogout]-----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleLogout(AsyncWebServerRequest *request) {
-  Serial.println("Disco");
+  Serial.println("Dsco");
   AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
   response->addHeader("Location", "/login.html?msg=User disconnected");
   response->addHeader("Cache-Control", "no-cache");
@@ -295,20 +350,39 @@ void handleCheckStatus(AsyncWebServerRequest *request) {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[handleUpdateConfig]-----------------------------------------]----------------
+//-FUNCTION-[handleUpdateConfig]-----------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleUpdateConfig(AsyncWebServerRequest *request) {
-  String s = "{\"Hello\":\"WORLD\"}";
- 
-    DynamicJsonDocument doc(1024);
-    deserializeJson(doc, request->arg("testval").c_str());
+  DynamicJsonDocument doc(1024);
+  deserializeJson(doc, request->arg("testval").c_str());
+  const char* password = doc["pass"];
+  if (strcmp(password,"") != 0){
+    writeConfigFile("admin","/accounts.cnf",password);
+  }
+  doc.remove("pass");
+  File resultfile = SPIFFS.open("/system.cnf","w");
+  serializeJson(doc, resultfile);
+  resultfile.close();
+  request->send(200, "text/html", "{\"s\":\"0\"}");
+  delay(200);
+  ESP.restart();
+  }
+//-----------------------------------------------------------------------]
 
-    const char* password = doc["pass"];
-    Serial.println(password);
-    sprinklersystem.writeConfigFile("blabla","/accounts.cnf",password);
-
-  request->send(200, "text/html", s);
-  return;
+//////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[handleGetconf]----------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void handleGetconf(AsyncWebServerRequest *request) {
+char user[20];
+getCookieUser(user,request->header("Cookie").c_str());
+Serial.print("USER ");
+Serial.println(user);
+if (strcmp(user,"admin")==0){
+  request->send(SPIFFS, "/system.cnf");
+}
+else {
+  request->send(200, "text/html", "{\"e\":\"np\"}");
+}
 }
 //-----------------------------------------------------------------------]
 
@@ -348,16 +422,14 @@ void serverRouting() {
   server.on("/login", HTTP_POST, handleLogin);
   server.on("/logout", HTTP_GET, handleLogout);
   server.on("/updateConfig", HTTP_POST, handleUpdateConfig);
-  server.onNotFound([](AsyncWebServerRequest *request) {               // If the client requests any URI
-    if (!handleFileRead(request, request->url())){                  // send it if it exists
-      handleNotFound(request); // otherwise, respond with a 404 (Not Found) error
+  server.on("/getConf",      HTTP_GET, handleGetconf);
+  server.onNotFound([](AsyncWebServerRequest *request) {  // If the client requests any URI
+    if (!handleFileRead(request, request->url())){        // send it if it exists
+      handleNotFound(request); // respond 404 
       Serial.println(request->url());
     }
   });
-  //Serial.println(F("Set cache"));
-  // Serve a file with no cache so every tile It's downloaded
   server.serveStatic("/configuration.json", SPIFFS, "/configuration.json", "no-cache, no-store, must-revalidate");
-  // Server all other page with long cache so browser chaching they
   server.serveStatic("/", SPIFFS, "/", "max-age=31536000");
 }
 //-----------------------------------------------------------------------]
@@ -481,8 +553,8 @@ void loadNetwork() {
   Serial.print("NETWORK: Connected at "); Serial.println(WiFi.localIP());
   ntp.begin();
   Serial.print("NTP:     ");
-  Serial.print(ntp.formattedTime("%d. %B %Y  ")); // dd. Mmm yyyy
-  Serial.println(ntp.formattedTime("%T")); // dd. Mmm yyyy
+  Serial.println(ntp.formattedTime("%d. %B %Y  %T")); // dd. Mmm yyyy
+  //Serial.println(ntp.formattedTime("%T")); // dd. Mmm yyyy
 }
 //-----------------------------------------------------------------------]
 
@@ -497,8 +569,20 @@ void acctMgr(const char* action,const char* account,const char* val){
     if ((action == "inspect")&&(account =="admin")&&(val=="0")){
       accountfile.println("{\"admin\":\"password\"}"); 
       accountfile.close();
-      Serial.println("USERS:   Created account file with default admin");
-    }  
+    } 
+ //}   
+ //if(!SPIFFS.exists("/perms.cnf")){
+ //   File permfile = SPIFFS.open("/perms.cnf","w");
+ //   if (!permfile){
+ //     Serial.print("wri err!");
+ //     return;  
+ //   }
+ //   if ((action == "inspect")&&(account =="admin")&&(val=="0")){
+ //     permfile.println("{\"admin\":\"admin\"}"); 
+ //     permfile.close();
+ //   }  
+// }
+    Serial.println("USERS:   Created account file with default admin");
     return;
  }
   Serial.println("USERS:   Account file exists");
@@ -511,7 +595,6 @@ void acctMgr(const char* action,const char* account,const char* val){
 void startup(){
   sprinklersystem.factoryDefaultChk();
   acctMgr("inspect","admin","0");
-  //sprinklersystem.acctMgr("inspect","admin","0");
   if (SPIFFS.exists("/network.cnf")){
      Serial.println("NETWORK: Already configured, Loading");
      loadNetwork();
@@ -526,6 +609,41 @@ void startup(){
   serverRouting();
   server.begin();
   Serial.print("WEBSVR:  Port ");Serial.println(WEBSERVPORT);
+  if (SPIFFS.exists("/system.cnf")){
+    loadConfig();
+   
+   /*
+   sprinklersystem.zoneInfo();
+   sprinklersystem.zoneInfo("first zone");
+   sprinklersystem.zoneInfo();
+   sprinklersystem.zoneInfo("second zone");
+   sprinklersystem.zoneInfo();
+   sprinklersystem.zoneInfo("third zone");
+   sprinklersystem.zoneInfo();
+   sprinklersystem.zoneInfo("fourth zone");
+
+   sprinklersystem.openZone("first zone");
+   delay(2000);
+   sprinklersystem.closeZone("first zone");
+   delay(2000);
+   sprinklersystem.openZone("second zone");
+   delay(2000);
+   sprinklersystem.closeZone("second zone");
+   delay(2000);
+   sprinklersystem.openZone("third zone");
+   delay(2000);
+   sprinklersystem.closeZone("third zone");
+   delay(2000);
+   sprinklersystem.openZone("fourth zone");
+   delay(2000);
+   sprinklersystem.closeZone("fourth zone");
+   delay(2000);
+
+    sprinklersystem.zoneInfo();  
+ 
+
+*/
+  }  
 }
 //-----------------------------------------------------------------------]
 
@@ -549,6 +667,11 @@ void setup() {
 //////////////////////////////////////////////////////////////////////////
 void loop() {
   sprinklersystem.factoryDefaultChk();
+  if(sprinklersystem.meterMoved()){
+     Serial.print(sprinklersystem.readMeter());
+     Serial.print("gallons, in litres -> ");
+     Serial.println(sprinklersystem.readMeter('l'));
+   }
   delay(5000);
 }
 //-----------------------------------------------------------------------]

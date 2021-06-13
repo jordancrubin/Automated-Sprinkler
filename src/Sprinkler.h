@@ -13,7 +13,11 @@
 #define Sprinkler_h
 
 // library interface description
-// This is a sprinklersystem. There are many like it, but this one is mine.
+// int statusledgpio, int hardresetgpio, int facdefdelayms
+// This is the onboard LED gpio, the gpio assigned as the factory reset button
+// and how many seconds for factory default with the button in milliseconds.
+// Usage of the onboard ESP32 led is generally 2, default reset gpio for this
+// project is 23, and 5 second wait is 5000 (2,23,5000)
 class SPRINKLERSYSTEM
 {
   ////////////// user-accessible "public" interface
@@ -31,14 +35,14 @@ class Zone {
 };
     FIVEWIREVALVE * thisvalve;
     WATERMETER * flowmeter;
-    Zone * storedZones[30];
-    int maxZones = 30;
+    Zone * storedZones[12];
+    int maxZones = 12;
     int LED;
     int FACDEFPIN;
     int FACDEFDELAY;
-    void addMeter(int,bool,char,long,bool,double,bool);
+    void addMeter(int,bool,char,long,bool,double);
     void addValve(int,int,int,bool); 
-    void addZone(int intval, const char* charval);
+    void addZone(int intval, char* charval);
     void closeZone(const char*);
     void factoryDefaultChk();
     bool meterMoved(void); 
@@ -54,7 +58,6 @@ class Zone {
     int valveMaxTravelTime(void);
     void valveMaxTravelTime(int);
     const char* valvePosition(void);
-    void writeConfigFile(char*, const char*, const char*);
     void zoneInfo();
     void zoneInfo(const char*);
 

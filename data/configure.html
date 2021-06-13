@@ -37,31 +37,41 @@
         counter -= 1
           });
         });
+    //******    
     function submitConfig(){
         let err = [];
         let gpios = [];
         let zones = [];
+        let znames = [];
         var wkflw = {};
         var duplicates = '';
         var msg = '';
         a = document.getElementById("adminpass1").value; wkflw.pass = a;
-        b = document.getElementById("adminpass2").value; wkflw.pass2 = b;
+        b = document.getElementById("adminpass2").value;
         c = document.getElementById("metreGpio").value; gpios.push(c);  wkflw.mtrio = c;
-        w = document.getElementById("metreMeasure").value; wkflw.meas = w;
+        if (document.getElementById("metreMeasureL").checked = true){w="l";}
+        else {w="g";}
+        wkflw.meas = w;
+        r = document.getElementById("metredebounce").value; wkflw.mtrdeb = r;
+        s = document.getElementById("metreinc").value; wkflw.mtrinc = s;
         d = document.getElementById("valveOpenGpio").value; gpios.push(d); wkflw.valopio = d;
         e = document.getElementById("valveCloseGpio").value; gpios.push(e); wkflw.valclio = e;
         f = document.getElementById("valveRelayGpio").value; gpios.push(f); wkflw.valrlyio = f;
         wkflw.zones = zones;
         if (a!=b){err.push('The admin password did not match the re-typed password.');}
-        else if(a.length < 8){err.push('The admin password must be a minimum of 8 characters.');}
+        if (cnftype ==1){
+          if(a.length < 8){err.push('The admin password must be a minimum of 8 characters.');}
+        }
         if ((c<1) || (c>40)) {err.push('The Metre GPIO value is out of bounds.');} 
         if ((d<1) || (d>40)) {err.push('The Valve Open GPIO value is out of bounds.');} 
         if ((e<1) || (e>40)) {err.push('The Valve Closed value is out of bounds.');} 
         if ((f<1) || (f>40)) {err.push('The Valve Relay value is out of bounds.');} 
+        if ((r<5) || (r>999)) {err.push('Meter debounce [ms] is beyond params');}
+        if (!s) {err.push('Metre Increment should be the flwo value of each pulse');}
         for (z = 1; z < counter; z++) {
             let thiszone = [];
             g= document.getElementById("zoneGpio"+z).value; gpios.push(g); thiszone.push(g);
-            h= document.getElementById("zoneName"+z).value; thiszone.push(h);
+            h= document.getElementById("zoneName"+z).value; thiszone.push(h); znames.push(h);
             i= document.getElementById("zoneDesc"+z).value; thiszone.push(i);
             wkflw.zones.push(thiszone);
             if ((g<1) || (g>40)) {err.push('The Zone ['+z+'] GPIO value is out of bounds.');} 
@@ -78,13 +88,31 @@
         err.forEach(function(item, index, array) {
             msg+=item+'<BR>';
         })
+        duplicates = '';
+        const znamesort = [...znames].sort()
+        for (let z = 0; z < znamesort.length; z++) {
+            if (znamesort[z + 1] === znamesort[z]) {
+                duplicates+='['+znamesort[z]+']';
+            }
+        }
+        if(duplicates.length>0){err.push('Duplicate zone names are found in this config ' +duplicates);}
+        err.forEach(function(item, index, array) {
+            msg+=item+'<BR>';
+        })
         if (err.length==0){
             console.log('NO ERRORS');
             var xhr = new XMLHttpRequest();
             xhr.onreadystatechange = function() {
             if (this.readyState == 4 && this.status == 200) {
                 var data = JSON.parse(this.responseText);
-                alert("ESP32 responded with"+data);
+                if (data.S == "0"){
+                  alert("System updated, device will reboot with changes...");
+                  window.location.href = "login.html";
+                }
+                else {
+                  alert("Update error, device wil reboot, try again...");
+                  window.location.href = "login.html";
+                }
             }
         };  
       var jsonstr = JSON.stringify(wkflw);
@@ -94,14 +122,55 @@
       xhr.send("testval="+jsonstr+"");  
     }
     document.getElementById('errorContent').innerHTML = msg;
-    $("#infoModalCenter").modal("toggle");
+    if (err.length !=0){
+      $("#infoModalCenter").modal("toggle");
+    }
+}
+//*******
+function getConf(){
+  var xhr = new XMLHttpRequest();
+            xhr.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+                var data = JSON.parse(this.responseText);
+                console.log(data);
+                if (data.e){
+                  if (data.e == "np"){
+                    alert("You do not have permission to accces this feature.");
+                    return 1;
+                  }
+                }
+                document.getElementById("metreGpio").value = data.mtrio;
+                if (data.meas == "l"){
+                  document.getElementById("metreMeasureL").checked = true;
+                }
+                else {document.getElementById("metreMeasureG").checked = true;}
+                document.getElementById("valveOpenGpio").value = data.valopio;
+                document.getElementById("valveCloseGpio").value = data.valclio;
+                document.getElementById("valveRelayGpio").value = data.valrlyio;
+                var counter =1;
+                data.zones.forEach(function(zone) {
+                  if (counter !=1){
+                    $("#addrow").triggerHandler("click");
+                  }
+                  document.getElementById("zoneGpio"+counter).value = zone[0];
+                  document.getElementById("zoneName"+counter).value = zone[1];
+                  document.getElementById("zoneDesc"+counter).value = zone[2]; 
+                 console.log(zone[0]);
+                 console.log(zone[1]);
+                 console.log(zone[2]);
+                 counter++;
+                });
+            }
+        };
+      xhr.open("GET", "getConf", true);
+      xhr.send();
 }
         </script>
     </head>
     <body class="sb-nav-fixed">
         <nav class="sb-topnav navbar navbar-expand navbar-dark bg-dark">
             <!-- Navbar Brand-->
-            <a class="navbar-brand ps-3" href="/configure">ESP Irrigate</a>
+            <a class="navbar-brand ps-3" href="/configure.html">ESP Irrigate</a>
             <!-- Navbar Search -->
             <form class="d-none d-md-inline-block form-inline ms-auto me-0 me-md-3 my-2 my-md-0">
             </form>
@@ -110,7 +179,7 @@
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fas fa-user fa-fw"></i></a>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                        <li><a class="dropdown-item" href="#!">Settings</a></li>
+                        <li><a class="dropdown-item" href="/configure.html">Settings</a></li>
                         <li><a class="dropdown-item" href="#!">Activity Log</a></li>
                         <li><hr class="dropdown-divider" /></li>
                         <li><a class="dropdown-item" href="#!" onclick="LogoutDialogue()">Logout</a></li>
@@ -151,7 +220,7 @@
                         </div><!-- /.row -->
                         <div class="row">
                           <div class="col-xs-4 col-md-6">
-                            <div class="alert alert-info">
+                            <div class="alert alert-info" id="pwinfo">
                               Replace the default admin password with your own, at least 8 characters.
                             </div>
                           </div>
@@ -189,17 +258,31 @@
                                   </div>
                                </div>     
                             </div>            
-                                <div class="col-xs-4 col-md-10">
+                                <div class="col-xs-4 col-md-2">
                                   <div class="form-group">
                                     <label>Measurement</label></div><div>
                                     <label class="radio-inline">
-                                      <input type="radio" name="metreMeasure" id="metreMeasure" value="g" checked="checked"> Gallons
+                                      <input type="radio" name="metreMeasure" id="metreMeasureG" value="g" checked="checked"> Gallons
                                     </label>
                                     <label class="radio-inline">
-                                      <input type="radio" name="metreMeasure" id="metreMeasure" value="l"> Litres
+                                      <input type="radio" name="metreMeasure" id="metreMeasureL" value="l"> Litres
                                     </label>
                                   </div>
                                 </div>
+                                <div class="col-xs-4 col-md-2">
+                                  <div class="form-group">
+                                    <label>Debounce Delay mS</label></div><div>
+                                      <input type="text" class="form-control" id="metredebounce" size="3" maxlength="3" value="200">
+                                  </div>
+                                </div>
+                                <div class="row"> 
+                                <div class="col-xs-4 col-md-2">
+                                  <div class="form-group">
+                                    <label>Increment of pulse</label></div><div>
+                                      <input type="text" class="form-control" id="metreinc" size="3" maxlength="3" value=".1">
+                                  </div>
+                                </div>
+                              </div>
                         </div>
                       </br></br>
                         <div class="row">              
@@ -305,8 +388,10 @@
     </body>
     <script>       
         if (cnftype != 1){
+            getConf();
             addSidebar();
             document.getElementById("title").innerHTML = "<h1>Configuration</h1>";
+            document.getElementById("pwinfo").innerHTML = "You may choose to update the admin password here.";
         }
         function LogoutDialogue() {
           if (confirm("Are you sure you want to logout?")) {

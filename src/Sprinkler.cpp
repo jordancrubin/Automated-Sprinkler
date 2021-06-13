@@ -32,7 +32,7 @@ SPRINKLERSYSTEM::Zone::Zone(int pin, const char* name)
 // ----------------------------------------------------------------------------]
 
 // FUNCTION - [addMeter] - [Returns the current version from the Object--------]
-void SPRINKLERSYSTEM::addMeter(int gpioPin, bool usePullup, char measure, long debounceDelay, bool useSpiffs, double increment, bool verbose){
+void SPRINKLERSYSTEM::addMeter(int gpioPin, bool usePullup, char measure, long debounceDelay, bool useSpiffs, double increment){
   //WATERMETER WATERMETER(SignalGPIOpin,useInternalPullupResistor,measure[g|l],metervalue)
   flowmeter = new WATERMETER(gpioPin,usePullup,measure,debounceDelay,useSpiffs,increment);
   flowmeter->setMeter(32.2);
@@ -47,7 +47,7 @@ void SPRINKLERSYSTEM::addValve(int relaygpio, int opengpio, int closedgpio, bool
 // ----------------------------------------------------------------------------]
 
 // FUNCTION - [addZone] - [Returns the current version from the Object---------]
-void SPRINKLERSYSTEM::addZone(int gpio, const char* zonename){
+void SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
   if (strlen(zonename) > 25){
     Serial.println(F("addZone::Zone Name 25 Char limit"));
     return;
@@ -111,6 +111,7 @@ void SPRINKLERSYSTEM::factoryDefaultChk(){
         SPIFFS.remove("/testnetwork.cnf");
         SPIFFS.remove("configuration.json");
         SPIFFS.remove("/accounts.cnf");
+        SPIFFS.remove("/system.cnf");
         Serial.println("Restart....");
         this->statusLedBlink(30,20);
         ESP.restart();
@@ -125,6 +126,8 @@ int SPRINKLERSYSTEM::getIndex(const char* name){
   int returnIndex = 99; // try -1
   for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
     if(storedZones[i]){
+//Serial.println(storedZones[i]->thisname);
+//Serial.println(name);
       if (strcmp(storedZones[i]->thisname,name)==0){ 
         returnIndex = i;
         return returnIndex;
@@ -161,18 +164,6 @@ void SPRINKLERSYSTEM::openZone(const char* name){
   else {
     Serial.print(F("openZone::Invalid Zone ")); Serial.println(name); 
   }  
-}
-// ----------------------------------------------------------------------------]
-
-// FUNCTION - [writeConfigFile] - [Adds or updates key pair values in cfg files-]
-void SPRINKLERSYSTEM::writeConfigFile(char* value, const char* filename, const char* parameter){
-Serial.print("param is");
-Serial.println(parameter);
-
-
-
-
-
 }
 // ----------------------------------------------------------------------------]
 
@@ -299,6 +290,7 @@ void SPRINKLERSYSTEM::zoneInfo(const char* name){
   int myIndex = this->getIndex(name);
   if (myIndex >=0 && myIndex <=maxZones+1) {
     Serial.print("\n\n***Zone info for "); Serial.print(name);Serial.println("***");
+Serial.println(storedZones[myIndex]->thisname);
     char buf[200];
     char igpio[3];
     const char *enabled = "FALSE";
