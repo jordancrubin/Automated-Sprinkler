@@ -105,7 +105,7 @@
             xhr.onreadystatechange = function() {
             if (this.readyState == 4 && this.status == 200) {
                 var data = JSON.parse(this.responseText);
-                if (data.S == "0"){
+                if (data.s == "0"){
                   alert("System updated, device will reboot with changes...");
                   window.location.href = "login.html";
                 }

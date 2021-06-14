@@ -5,7 +5,6 @@
     */
     // 
 // Scripts
-// 
 
 function getCookie(cname) {
     var name = cname + "=";

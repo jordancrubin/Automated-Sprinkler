@@ -47,7 +47,7 @@
   </div>
 </div>
 <script>
-///////////////////////////////// connectWifi()  Connection request routine
+/// connectWifi()  Connection request routine
     function connectWifi(){
        var dropdown = document.getElementById('Wifilist');
        var spinner = document.getElementById('spinner');
@@ -86,7 +86,7 @@
       xhr.send("ssidval="+ssid+"&keyval="+key+"");   
     }
 
-///////////////////////////////// selectChange()  Dynamic select box functions  
+/// selectChange()  Dynamic select box functions  
     function selectChange() {
       var dropdown = document.getElementById('Wifilist');
       var keysect = document.getElementById('keySection');
@@ -100,9 +100,8 @@
         keysect.style.display = 'block';
       }   
     }
-///////////////////////////////////////////////////////////////////
 
-///////////////////////////////// showPass()  show or hide password field
+///showPass()  show or hide password field
     function showPass() {
       var x = document.getElementById("keyfield");
       if (x.type === "password") {
@@ -113,7 +112,7 @@
       }
     } 
 
-///////////////////////////////// updateWifilist()  Dynamic refresh of SSIDs  
+/// updateWifilist()  Dynamic refresh of SSIDs  
     function updateWifiList() {
       var dropdown = document.getElementById('Wifilist');
       var keysect = document.getElementById('keySection');

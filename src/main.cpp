@@ -171,7 +171,7 @@ Serial.print(F("LOADCFG: "));
 //-FUNCTION-[isAut]------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 bool isAuth(AsyncWebServerRequest *request) {
-  Serial.println("In isAuth");
+  //Serial.println("In isAuth");
   if (request->hasHeader("Cookie")) {
     Serial.print("Cookie: ");
     String cookie = request->header("Cookie");
@@ -203,7 +203,7 @@ bool isAuth(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleFileRead]---------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 bool handleFileRead(AsyncWebServerRequest *request, String path) {
-  Serial.print(F("handleFileRead: "));
+  //Serial.print(F("handleFileRead: "));
   Serial.println(path);
   if (!isAuth(request)) {
     Serial.println(F("->login"));
@@ -263,7 +263,7 @@ void handleNotFound(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleLogin]------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleLogin(AsyncWebServerRequest *request) {
-  Serial.println("handleLogin");
+  //Serial.println("handleLogin");
   if (request->hasHeader("Cookie")) {
     //Serial.print("Found cookie: ");
     String cookie = request->header("Cookie");
@@ -364,7 +364,7 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
   serializeJson(doc, resultfile);
   resultfile.close();
   request->send(200, "text/html", "{\"s\":\"0\"}");
-  delay(200);
+  delay(400);
   ESP.restart();
   }
 //-----------------------------------------------------------------------]
@@ -373,16 +373,16 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleGetconf]----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleGetconf(AsyncWebServerRequest *request) {
-char user[20];
-getCookieUser(user,request->header("Cookie").c_str());
-Serial.print("USER ");
-Serial.println(user);
-if (strcmp(user,"admin")==0){
-  request->send(SPIFFS, "/system.cnf");
-}
-else {
-  request->send(200, "text/html", "{\"e\":\"np\"}");
-}
+  char user[20];
+  getCookieUser(user,request->header("Cookie").c_str());
+  Serial.print("USER ");
+  Serial.println(user);
+  if (strcmp(user,"admin")==0){
+    request->send(SPIFFS, "/system.cnf");
+  }
+  else {
+    request->send(200, "text/html", "{\"e\":\"np\"}");
+  }
 }
 //-----------------------------------------------------------------------]
 
@@ -418,7 +418,6 @@ String sha1(String payloadStr){
 //-FUNCTION-[serverRouting]----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void serverRouting() {
-// External rest end point (out of authentication)
   server.on("/login", HTTP_POST, handleLogin);
   server.on("/logout", HTTP_GET, handleLogout);
   server.on("/updateConfig", HTTP_POST, handleUpdateConfig);
@@ -510,10 +509,10 @@ void configNetwork() {
         return;
       }
     }
-  resultfile.println("{\"CONN\":\"SUCCESS\"}");
-  resultfile.close();
-  SPIFFS.rename("/testnetwork.cnf", "/network.cnf");
-  Serial.println(WiFi.localIP());
+    resultfile.println("{\"CONN\":\"SUCCESS\"}");
+    resultfile.close();
+    SPIFFS.rename("/testnetwork.cnf", "/network.cnf");
+    Serial.println(WiFi.localIP());
   }
   server.on("/", HTTP_GET , handleCfgRoot);
 }
