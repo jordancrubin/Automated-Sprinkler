@@ -13,28 +13,56 @@
         <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
         <script src="js/scripts.js"></script>
         <script>
+            var progOb = {};
             cookieChk();
             const queryString = window.location.search;
             const urlParams = new URLSearchParams(queryString);
             const cnftype = urlParams.get('newcnf')
             console.log(cnftype);
             var counter = 2;
+            var rowIdx=1;
             $(document).ready(function () {
             $("#addrow").on("click", function () {
               if(counter==9){return;}  
-              var newRow = $("<tr>");
-              var cols = "";
-              cols += '<td><input type="text" class="form-control" id="zoneGpio' + counter + '" size="2" maxlength="2" name="zoneGpio' + counter + '"></td>';
-              cols += '<td><input type="text" class="form-control" id="zoneName' + counter + '" name="zoneName' + counter + '"/></td>';
-              cols += '<td><input type="text" class="form-control" id="zoneDesc' + counter + '" name="zoneDesc' + counter + '"/></td>';
-              cols += '<td><input type="button" class="ibtnDel btn btn-md btn-danger "  value="Delete"></td>';
-              newRow.append(cols);
-              $("table.order-list").append(newRow);
-               counter++;
-          });
-          $("table.order-list").on("click", ".ibtnDel", function (event) {
-        $(this).closest("tr").remove();       
-        counter -= 1
+        // Adding a row inside the tbody.
+        $('#zonebody').append(`<tr id="R${++rowIdx}">
+          <td><input type="text" class="form-control" id="zoneGpio${counter}" size="2" maxlength="2" name="zoneGpio${counter}"></td>
+          <td><input type="text" class="form-control" id="zoneName${counter}" name="zoneName${counter}"/></td>
+          <td><input type="text" class="form-control" id="zoneDesc${counter}" name="zoneDesc${counter}"/></td>
+          <td><input type="button" class="ibtnDel btn btn-md btn-danger "  value="Delete"></td>`);
+          counter++;
+      });
+        $("table.order-list").on("click", ".ibtnDel", function (event) {
+        var child = $(this).closest('tr').nextAll();
+        //var ct =1;
+        var thisrow = child.prevObject[0].attributes.id.value;
+        thisrow = parseInt(thisrow.substring(1));
+        //console.log(thisrow);  
+        delete progOb[thisrow];
+        thisrow++; 
+        while (thisrow < 9) {// loop from thisrow to 8
+          if (typeof progOb[thisrow] != "undefined"){// is something at this row
+            progOb[thisrow-1] = progOb[thisrow];// copy to one row below
+            delete progOb[thisrow];
+          }
+          thisrow++;
+        }
+        console.log(progOb);
+        child.each(function () {
+          var id = $(this).attr('id');
+          var dig = parseInt(id.substring(1));     
+          var subdig = dig -1;
+          document.getElementById('zoneGpio'+dig).id = 'zoneGpio'+subdig; 
+          document.getElementById('zoneGpio'+subdig).name = 'zoneGpio'+subdig;
+          document.getElementById('zoneName'+dig).id = 'zoneName'+subdig; 
+          document.getElementById('zoneName'+subdig).name = 'zoneName'+subdig;
+          document.getElementById('zoneDesc'+dig).id = 'zoneDesc'+subdig; 
+          document.getElementById('zoneDesc'+subdig).name = 'zoneDesc'+subdig;          
+          $(this).attr('id', `R${dig - 1}`);
+        });
+        $(this).closest('tr').remove();
+        rowIdx--;      
+        counter -= 1;
           });
         });
     //******    
@@ -68,15 +96,27 @@
         if ((f<1) || (f>40)) {err.push('The Valve Relay value is out of bounds.');} 
         if ((r<5) || (r>999)) {err.push('Meter debounce [ms] is beyond params');}
         if (!s) {err.push('Metre Increment should be the flwo value of each pulse');}
-        for (z = 1; z < counter; z++) {
+        var inc = 1;
+        for (var z = 1; z < counter; z++) {
             let thiszone = [];
             g= document.getElementById("zoneGpio"+z).value; gpios.push(g); thiszone.push(g);
             h= document.getElementById("zoneName"+z).value; thiszone.push(h); znames.push(h);
             i= document.getElementById("zoneDesc"+z).value; thiszone.push(i);
+            if (cnftype == 1){thiszone.push(0);thiszone.push(0);thiszone.push(0);}
+//if (cnftype == 1){thiszone.push(z);thiszone.push(z);thiszone.push(z);}     
+            else {
+              if (typeof progOb[z] != "undefined") {thiszone.push(progOb[z].A); console.log(progOb[z].A);} 
+               else {thiszone.push(0);}
+               if (typeof progOb[z] != "undefined") {thiszone.push(progOb[z].B); console.log(progOb[z].B);} 
+               else {thiszone.push(0);}
+               if (typeof progOb[z] != "undefined") {thiszone.push(progOb[z].C); console.log(progOb[z].C);} 
+               else {thiszone.push(0);}
+           }
             wkflw.zones.push(thiszone);
             if ((g<1) || (g>40)) {err.push('The Zone ['+z+'] GPIO value is out of bounds.');} 
             if ((h.length==0)||(h.length>30)){err.push('The Zone ['+z+'] requires a name not to exceed 30 chars.');}  
-            if ((h.length==0)||(h.length>70)){err.push('The Zone ['+z+'] requires a description not to exceed 70 chars.');}     
+            if ((h.length==0)||(h.length>70)){err.push('The Zone ['+z+'] requires a description not to exceed 70 chars.');}  
+            inc++;   
         }
         const gpiosort = [...gpios].sort()
         for (let z = 0; z < gpiosort.length; z++) {
@@ -119,7 +159,8 @@
       console.log(jsonstr);
       xhr.open("POST", "updateConfig", true);
       xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-      xhr.send("testval="+jsonstr+"");  
+      //xhr.send("testval="+jsonstr+""); 
+      xhr.send("testval="+jsonstr+"&filetype=cfg"); 
     }
     document.getElementById('errorContent').innerHTML = msg;
     if (err.length !=0){
@@ -155,15 +196,17 @@ function getConf(){
                   document.getElementById("zoneGpio"+counter).value = zone[0];
                   document.getElementById("zoneName"+counter).value = zone[1];
                   document.getElementById("zoneDesc"+counter).value = zone[2]; 
-                 console.log(zone[0]);
-                 console.log(zone[1]);
-                 console.log(zone[2]);
-                 counter++;
+                  progOb[counter] = {};
+                  progOb[counter].A = zone[3];
+                  progOb[counter].B = zone[4];
+                  progOb[counter].C = zone[5];
+                  counter++;
                 });
             }
         };
-      xhr.open("GET", "getConf", true);
-      xhr.send();
+      xhr.open("POST", "getConf", true);
+      xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+      xhr.send("filetype=cfg");
 }
         </script>
     </head>
@@ -179,7 +222,6 @@ function getConf(){
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fas fa-user fa-fw"></i></a>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                        <li><a class="dropdown-item" href="/configure.html">Settings</a></li>
                         <li><a class="dropdown-item" href="#!">Activity Log</a></li>
                         <li><hr class="dropdown-divider" /></li>
                         <li><a class="dropdown-item" href="#!" onclick="LogoutDialogue()">Logout</a></li>
@@ -338,8 +380,8 @@ function getConf(){
                                                 <td>Description</td>
                                             </tr>
                                         </thead>
-                                        <tbody>
-                                            <tr>
+                                        <tbody id="zonebody">
+                                            <tr id="R1">
                                                 <td class="col-sm-1">
                                                     <input type="text" class="form-control" id="zoneGpio1" size="2" maxlength="2">
                                                 </td>
@@ -392,18 +434,6 @@ function getConf(){
             addSidebar();
             document.getElementById("title").innerHTML = "<h1>Configuration</h1>";
             document.getElementById("pwinfo").innerHTML = "You may choose to update the admin password here.";
-        }
-        function LogoutDialogue() {
-          if (confirm("Are you sure you want to logout?")) {
-            const Http = new XMLHttpRequest();
-            const url='/logout';
-            Http.open("GET", url);
-            Http.send();
-            Http.onreadystatechange = (e) => {
-                window.location.href = "login.html";
-            }           
-          } 
-          else { }
         }
         </script>
 </html>

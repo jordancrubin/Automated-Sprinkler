@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="ESP 32 Irrigation Initial Configuration" />
+        <meta name="author" content="Jordan Rubin" />
+        <title>Zone Programmes - RubinTech</title>
+        <link href="https://cdn.jsdelivr.net/npm/simple-datatables@latest/dist/style.css" rel="stylesheet" />
+        <link href="css/styles.css" rel="stylesheet" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/js/all.min.js" crossorigin="anonymous"></script>
+        <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
+        <script src="js/scripts.js"></script>
+        <script>
+            cookieChk();
+            var data;
+            var counter = 1;
+            var program ="A";
+            $(document).ready(function () {
+          $("table.order-list").on("click", ".ibtnDel", function (event) {
+        $(this).closest("tr").remove();       
+        counter -= 1
+          });
+        });
+    
+function addRow(thiscount){ 
+  var newRow = $("<tr>");
+  var cols = "";
+  cols += '<td><input type="text" class="form-control" id="'+program+'zoneName' + thiscount + '" name="'+program+'zoneName' + thiscount + '"/></td>';
+  cols += '<td><input type="text" class="form-control" id="'+program+'zoneDur' + thiscount + '" name="'+program+'zoneDur' + thiscount + '"/></td>';
+  newRow.append(cols);
+  $("table.order-list"+program).append(newRow);
+}
+
+function submitConfig(){
+  console.log(data);
+  for (i = 3; i < 6; i++) {
+    counter=1;
+    program = "A";
+    if(i==4){program ="B"};
+    if(i==5){program ="C"};
+    console.log("program is "+program);
+    data.zones.forEach(function(zone) {    
+      zone[i] =  document.getElementById(program+"zoneDur"+counter).value;
+      counter++;                     
+      console.log("counter "+counter);
+    });
+  }
+  data.pass = '';
+  console.log(data);
+  let err = [];
+  var msg = '';
+  var wkflw = {};
+  let programmea = [];
+  let programmeb = [];
+  let programmec = [];
+  a = document.getElementById("stA").value; programmea.push(a);
+  b = document.getElementById("stB").value; programmeb.push(b);
+  c = document.getElementById("stC").value; programmec.push(c);
+  for (i = 1; i < 4; i++) {
+    program = "A";
+    if(i==2){program ="B"};
+    if(i==3){program ="C"};
+    for (j = 1; j < 8; j++) { 
+      var day = document.getElementById(program+"-"+j).checked;
+        if(i==1){programmea.push(day);}
+        if(i==2){programmeb.push(day);}
+        if(i==3){programmec.push(day);}
+    }
+  }
+  if ( (a<0)||(a>2359)||(b<0)||(b>2359)||(c<0)||(c>2359)) {
+    err.push('Start time must be between 0 and 2359 hours');
+  }
+  wkflw.programa = programmea;
+  wkflw.programb = programmeb;
+  wkflw.programc = programmec;
+  console.log(wkflw); 
+  if (err.length==0){
+    console.log('NO ERRORS');
+    var xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        var returndata = JSON.parse(this.responseText);
+ 
+                      if (returndata.s == "0"){
+                        var xhx = new XMLHttpRequest();
+                        xhx.onreadystatechange = function() {
+                       if (this.readyState == 4 && this.status == 200) {
+                        var returndata = JSON.parse(this.responseText);
+                        if (returndata.s == "0"){
+                          alert("System updated, device will reboot with changes...");
+                          window.location.href = "login.html";
+                        }
+                       }
+                      }; 
+                    var jsonstr = JSON.stringify(wkflw);
+                    console.log(jsonstr);
+                    xhx.open("POST", "updateConfig", true);
+                    xhx.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                    xhx.send("testval="+jsonstr+"&filetype=program");
+                      }
+                      else {
+                        alert("Update error, device wil reboot, try again...");
+                        window.location.href = "login.html";
+                      }
+      }
+    };  
+    var jsonstr = JSON.stringify(data);
+    console.log(jsonstr);
+    xhr.open("POST", "updateConfig", true);
+    xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+    xhr.send("testval="+jsonstr+"&filetype=cfg");
+  }
+  document.getElementById('errorContent').innerHTML = msg;
+  if (err.length !=0){
+    $("#infoModalCenter").modal("toggle");
+  }
+ }
+
+//*******
+function getConf(){
+  var xhr = new XMLHttpRequest();
+            xhr.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+                data = JSON.parse(this.responseText);
+                if (data.e){
+                  if (data.e == "np"){
+                    alert("You do not have permission to accces this feature.");
+                    return 1;
+                  }
+                }
+                for (i = 3; i < 6; i++) {
+                    counter=1;
+                    program = "A";
+                    if(i==4){program ="B"};
+                    if(i==5){program ="C"};
+                    data.zones.forEach(function(zone) {                
+                      addRow(counter);  
+                      document.getElementById(program+"zoneName"+counter).value = zone[1];
+                      document.getElementById(program+"zoneDur"+counter).value = zone[i];      
+                      counter++;
+                    });
+                }
+                var xhx = new XMLHttpRequest();
+                xhx.onreadystatechange = function() {
+                  if (this.readyState == 4 && this.status == 200) {
+                    data = JSON.parse(this.responseText);
+                    if (data.e){
+                      if (data.e == "np"){
+                      alert("You do not have permission to accces this feature.");
+                      return 1;
+                      }
+                    }
+                  /////////////
+                   console.log(data);
+                  /////////////  
+                  }
+                };
+                xhx.open("POST", "getConf", true);
+                xhx.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                xhx.send("filetype=prg");   
+            }
+        };
+      xhr.open("POST", "getConf", true);
+      xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+      xhr.send("filetype=cfg");
+}
+        </script>
+    </head>
+    <body class="sb-nav-fixed">
+        <nav class="sb-topnav navbar navbar-expand navbar-dark bg-dark">
+            <!-- Navbar Brand-->
+            <a class="navbar-brand ps-3" href="/programme.html">ESP Irrigate</a>
+            <!-- Navbar Search -->
+            <form class="d-none d-md-inline-block form-inline ms-auto me-0 me-md-3 my-2 my-md-0">
+            </form>
+
+            <!-- Navbar -->
+            <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fas fa-user fa-fw"></i></a>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
+                      <li><a class="dropdown-item" href="/configure.html">Configure</a></li>
+                        <li><a class="dropdown-item" href="/programme.html">Programme</a></li>
+                        <li><hr class="dropdown-divider" /></li>
+                        <li><a class="dropdown-item" href="#!" onclick="LogoutDialogue()">Logout</a></li>
+                    </ul>
+                </li>
+            </ul>
+        </nav> 
+        
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sb-sidenav accordion sb-sidenav-dark" id="sidenavAccordion">
+                    <div class="sb-sidenav-menu" id="sidenav-menu-content"> 
+ 
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+<!-- Modal -->
+<div class="modal fade" id="infoModalCenter" tabindex="-1" role="dialog" aria-labelledby="infoModalCenterTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="exampleModalLongTitle">Configuration Errors</h5>
+        </div>
+        <div class="modal-body" id="errorContent">
+        </div>
+        <div class="modal-footer">
+        </div>
+      </div>
+    </div>
+  </div>
+                    <div class="container-fluid px-4">
+                    <div id="page-wrapper">
+                        <div class="row">
+                          <div class="col-lg-12" id="title">
+                            <h1>Zone Programmes</h1>
+                          </div>
+                        </div><!-- /.row -->
+                        <div class="row">
+                          <div class="col-xs-4 col-md-6">
+                            <div class="alert alert-info" id="pwinfo">
+                              PROGRAMME [A]
+                            </div>
+                          </div>
+                        </div>                         
+                        <div class="row">
+                        <div class="col-xs-4 col-md-3">
+                            <div class="form-group">
+                             <!-- <form>-->
+                                <div class="form-group">
+                                    <label for="starttimeA">Start Time 0000-2359
+                                    <input type="text" class="form-control" id="stA" name="stA" placeholder="1800">
+                                      </label>
+                                    <label class="radio-inline">   
+                                      <div class="weekDays-selector">
+                                        <input type="checkbox" id="A-1" class="weekday" />
+                                        <label for="weekday-mon">M</label>
+                                        <input type="checkbox" id="A-2" class="weekday" />
+                                        <label for="weekday-tue">T</label>
+                                        <input type="checkbox" id="A-3" class="weekday" />
+                                        <label for="weekday-wed">W</label>
+                                        <input type="checkbox" id="A-4" class="weekday" />
+                                        <label for="weekday-thu">T</label>
+                                        <input type="checkbox" id="A-5" class="weekday" />
+                                        <label for="weekday-fri">F</label>
+                                        <input type="checkbox" id="A-6" class="weekday" />
+                                        <label for="weekday-sat">S</label>
+                                        <input type="checkbox" id="A-7" class="weekday" />
+                                        <label for="weekday-sun">S</label>
+                                      </div>  
+                                    </label>
+                                </div>
+                              </div>
+                            </div>
+                        </div>
+                      </br></br>
+                    <div class="row">
+                      <div class="col-xs-4 col-md-6">
+                        <div class="alert alert-info">
+                          Zone Usage
+                        </div>
+                      </div>
+                    </div> 
+                    <div class="row">
+                        <div class="col-xs-4 col-md-6">
+                            <div class="form-group">
+                              <form>
+                                <div class="form-group">
+                                    <table id="myTable" class=" table order-listA">
+                                        <thead>
+                                            <tr>
+                                                <td>Name</td>
+                                                <td>Duration</td>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+
+                                        </tbody>
+                                        <tfoot>
+                                            <tr>
+                                                <td>    
+                                                    </br>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                             </div>  
+                         </div>
+             
+                <div class="row">
+                  <div class="col-xs-4 col-md-6">
+                    <div class="alert alert-info" id="pwinfo">
+                      PROGRAMME [B]
+                    </div>
+                  </div>
+                </div>                         
+                <div class="row">
+                <div class="col-xs-4 col-md-3">
+                    <div class="form-group">
+                     <!-- <form>-->
+                        <div class="form-group">
+                          <label for="starttimeB">Start Time 0000-2359
+                          <input type="text" class="form-control" id="stB" name="stB" placeholder="1800">
+                          </label>
+                          <label class="radio-inline">   
+                            <div class="weekDays-selector">
+                              <input type="checkbox" id="B-1" class="weekday" />
+                              <label for="weekday-mon">M</label>
+                              <input type="checkbox" id="B-2" class="weekday" />
+                              <label for="weekday-tue">T</label>
+                              <input type="checkbox" id="B-3" class="weekday" />
+                              <label for="weekday-wed">W</label>
+                              <input type="checkbox" id="B-4" class="weekday" />
+                              <label for="weekday-thu">T</label>
+                              <input type="checkbox" id="B-5" class="weekday" />
+                              <label for="weekday-fri">F</label>
+                              <input type="checkbox" id="B-6" class="weekday" />
+                              <label for="weekday-sat">S</label>
+                              <input type="checkbox" id="B-7" class="weekday" />
+                              <label for="weekday-sun">S</label>
+                            </div>  
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                </div>
+              </br></br>
+            <div class="row">
+              <div class="col-xs-4 col-md-6">
+                <div class="alert alert-info">
+                  Zone Usage
+                </div>
+              </div>
+            </div> 
+            <div class="row">
+                <div class="col-xs-4 col-md-6">
+                    <div class="form-group">
+                      <form>
+                        <div class="form-group">
+                            <table id="myTable" class=" table order-listB">
+                                <thead>
+                                    <tr>
+                                        <td>Name</td>
+                                        <td>Duration</td>
+                                    </tr>
+                                </thead>
+                                <tbody>
+
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td>    
+                                            </br>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                     </div>  
+                 </div>
+    
+        <div class="row">
+          <div class="col-xs-4 col-md-6">
+            <div class="alert alert-info" id="pwinfo">
+              PROGRAMME [C]
+            </div>
+          </div>
+        </div>                         
+        <div class="row">
+        <div class="col-xs-4 col-md-3">
+            <div class="form-group">
+             <!-- <form>-->
+                <div class="form-group">
+                  <label for="starttimeB">Start Time 0000-2359
+                  <input type="text" class="form-control" id="stC" name="stC" placeholder="1800">
+                  </label>
+                  <label class="radio-inline">   
+                    <div class="weekDays-selector">
+                      <input type="checkbox" id="C-1" class="weekday" />
+                      <label for="weekday-mon">M</label>
+                      <input type="checkbox" id="C-2" class="weekday" />
+                      <label for="weekday-tue">T</label>
+                      <input type="checkbox" id="C-3" class="weekday" />
+                      <label for="weekday-wed">W</label>
+                      <input type="checkbox" id="C-4" class="weekday" />
+                      <label for="weekday-thu">T</label>
+                      <input type="checkbox" id="C-5" class="weekday" />
+                      <label for="weekday-fri">F</label>
+                      <input type="checkbox" id="C-6" class="weekday" />
+                      <label for="weekday-sat">S</label>
+                      <input type="checkbox" id="C-7" class="weekday" />
+                      <label for="weekday-sun">S</label>
+                    </div>  
+                  </label>
+                </div>
+              </div>
+            </div>
+        </div>
+      </br></br>
+    <div class="row">
+      <div class="col-xs-4 col-md-6">
+        <div class="alert alert-info">
+          Zone Usage
+        </div>
+      </div>
+    </div> 
+    <div class="row">
+        <div class="col-xs-4 col-md-6">
+            <div class="form-group">
+              <form>
+                <div class="form-group">
+                    <table id="myTable" class=" table order-listC">
+                        <thead>
+                            <tr>
+                                <td>Name</td>
+                                <td>Duration</td>
+                            </tr>
+                        </thead>
+                        <tbody>
+
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td>    
+                                    <input class="btn btn-success" type="button" value="Submit" onclick="submitConfig()">
+                                </td>
+                            </tr>
+                            <tr>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+             </div>  
+         </div>
+</main>
+
+                <footer class="py-4 bg-light mt-auto">
+                    <div class="container-fluid px-4">
+                        <div class="d-flex align-items-center justify-content-between small">
+                            <div class="text-muted">Copyright &copy; Jordan Rubin 2021</div>
+                            <div>
+                                <a href="#">Privacy Policy</a>
+                                &middot;
+                                <a href="#">Terms &amp; Conditions</a>
+                            </div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+        <script>
+          getConf();
+          addSidebar();
+        </script>
+    </body>
+    <script>       
+        </script>
+</html>

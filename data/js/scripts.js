@@ -26,7 +26,7 @@ function cookieChk(){
     var testsession = getCookie("SESSIONID");
     if (testsession == 0){
         console.log("redirect it");
-        location.replace("/login.html");
+  //      location.replace("/login.html");
     }
 }
 
@@ -40,6 +40,19 @@ function getURLParameter(sParam){
         }
     }
 }
+
+function LogoutDialogue() {
+    if (confirm("Are you sure you want to logout?")) {
+      const Http = new XMLHttpRequest();
+      const url='/logout';
+      Http.open("GET", url);
+      Http.send();
+      Http.onreadystatechange = (e) => {
+          window.location.href = "login.html";
+      }           
+    } 
+    else { }
+  }
 
 function addSidebar() { 
 const content = `

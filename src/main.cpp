@@ -135,9 +135,9 @@ void writeConfigFile(char* value, const char* filename, const char* parameter){
 // FUNCTION - [loadConfig] - [Returns the current version from the Object--------]
 void loadConfig(){
 Serial.print(F("LOADCFG: "));
-  File file = SPIFFS.open("/system.cnf");
+File file = SPIFFS.open("/system.cnf");
 //while (file.available()) {
-//    Serial.write(file.read());
+//Serial.write(file.read());
 //}
 //file.close();
 //  file = SPIFFS.open("/system.cnf");
@@ -227,6 +227,11 @@ bool handleFileRead(AsyncWebServerRequest *request, String path) {
     if(path=="/index.html"){
       if (!SPIFFS.exists("/system.cnf")){
         request->redirect("/configure.html?newcnf=1");
+      }
+      else {
+        if (!SPIFFS.exists("/programmes.cnf")){
+          request->redirect("/programme.html");
+        } 
       }
     }
     response->addHeader("Cache-Control", "no-cache");  
@@ -354,19 +359,28 @@ void handleCheckStatus(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 void handleUpdateConfig(AsyncWebServerRequest *request) {
   DynamicJsonDocument doc(1024);
+  char *filename = "/programmes.cnf";
   deserializeJson(doc, request->arg("testval").c_str());
-  const char* password = doc["pass"];
-  if (strcmp(password,"") != 0){
-    writeConfigFile("admin","/accounts.cnf",password);
+  if (request->arg("filetype") == "cfg") {
+    filename = "/system.cnf";
+    const char* password = doc["pass"];
+    if (strcmp(password,"") != 0){
+      writeConfigFile("admin","/accounts.cnf",password);
+    }
+    doc.remove("pass");
   }
-  doc.remove("pass");
-  File resultfile = SPIFFS.open("/system.cnf","w");
-  serializeJson(doc, resultfile);
-  resultfile.close();
-  request->send(200, "text/html", "{\"s\":\"0\"}");
-  delay(400);
-  ESP.restart();
-  }
+    File resultfile = SPIFFS.open(filename,"w");
+    serializeJson(doc, resultfile);
+    resultfile.close();
+    request->send(200, "text/html", "{\"s\":\"0\"}");
+    delay(400);
+//File file = SPIFFS.open("/programmes.cnf");
+//while (file.available()) {
+//Serial.write(file.read());
+//}
+//file.close();
+    ESP.restart();
+}
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
@@ -374,11 +388,15 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 void handleGetconf(AsyncWebServerRequest *request) {
   char user[20];
+  char *filename = "/programmes.cnf";
+    if (request->arg("filetype") == "cfg") {
+      filename = "/system.cnf";
+    }
   getCookieUser(user,request->header("Cookie").c_str());
   Serial.print("USER ");
   Serial.println(user);
   if (strcmp(user,"admin")==0){
-    request->send(SPIFFS, "/system.cnf");
+      request->send(SPIFFS, filename);      
   }
   else {
     request->send(200, "text/html", "{\"e\":\"np\"}");
@@ -421,7 +439,7 @@ void serverRouting() {
   server.on("/login", HTTP_POST, handleLogin);
   server.on("/logout", HTTP_GET, handleLogout);
   server.on("/updateConfig", HTTP_POST, handleUpdateConfig);
-  server.on("/getConf",      HTTP_GET, handleGetconf);
+  server.on("/getConf",      HTTP_POST, handleGetconf);
   server.onNotFound([](AsyncWebServerRequest *request) {  // If the client requests any URI
     if (!handleFileRead(request, request->url())){        // send it if it exists
       handleNotFound(request); // respond 404 
