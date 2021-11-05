@@ -47,10 +47,10 @@ void SPRINKLERSYSTEM::addValve(int relaygpio, int opengpio, int closedgpio, bool
 // ----------------------------------------------------------------------------]
 
 // FUNCTION - [addZone] - [Returns the current version from the Object---------]
-void SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
+const char* SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
   if (strlen(zonename) > 25){
-    Serial.println(F("addZone::Zone Name 25 Char limit"));
-    return;
+    //Serial.println(F("addZone::Zone Name 25 Char limit"));
+    return "25Charnamelimit";
   }  
   for(int i=0; i< maxZones; i++){
      if (storedZones[i]){continue;}
@@ -58,15 +58,15 @@ void SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
       int myIndex = this->getIndex(zonename);
       if (myIndex >=0 && myIndex <=maxZones+1) {
           Serial.print(F("addZone::Error adding ")); Serial.print(zonename);
-          Serial.println(F(" name in use...")); 
-          return;
+          //Serial.println(F(" name in use...")); 
+          return "nameinuse";
       }
       myIndex = this->getIndex(gpio);
       if (myIndex >=0 && myIndex <=maxZones+1) {
           Serial.print(F("addZone::Error adding ")); Serial.print(gpio);
           Serial.print(F(" as ")); Serial.print(zonename);
-          Serial.println(F(" GPIO in use..."));
-          return;
+          //Serial.println(F(" GPIO in use..."));
+          return "gpioinuse";
       }
       Serial.print("addZone::Adding Solenoid on GPIO "); Serial.print(gpio);
       Serial.print(" as "); Serial.println(zonename);
@@ -75,6 +75,7 @@ void SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
       break;
     }
   }
+  return 0;
 }
 // ----------------------------------------------------------------------------]
 
@@ -112,7 +113,7 @@ void SPRINKLERSYSTEM::factoryDefaultChk(){
         SPIFFS.remove("configuration.json");
         SPIFFS.remove("/accounts.cnf");
         SPIFFS.remove("/system.cnf");
-        Serial.println("Restart....");
+      //  lcd.print("Restart....");
         this->statusLedBlink(30,20);
         ESP.restart();
         break;

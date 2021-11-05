@@ -42,7 +42,7 @@ class Zone {
     int FACDEFDELAY;
     void addMeter(int,bool,char,long,bool,double);
     void addValve(int,int,int,bool); 
-    void addZone(int intval, char* charval);
+    const char* addZone(int intval, char* charval);
     void closeZone(const char*);
     void factoryDefaultChk();
     bool meterMoved(void); 

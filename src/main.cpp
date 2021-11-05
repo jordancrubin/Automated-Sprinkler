@@ -7,7 +7,11 @@
   2021 Jordan Rubin.
 */
 #define WEBSERVPORT 80
-#include <Arduino.h>  
+#define LCDROWS 20
+#define LCDCOLS 4
+#include <Arduino.h>
+#include <LiquidCrystal_PCF8574.h> 
+#include <Wire.h> 
 #include <WiFi.h>
 #include <WiFiAP.h>
 #include <AsyncTCP.h>
@@ -22,12 +26,25 @@
 const char* ssid = "sprinklersystem";    //SSID of the netconfig Access point
 const char* deviceName = "sprinkler32";  //Mdns name sprinkler32.local
 
+LiquidCrystal_PCF8574 lcd(0x27); 
 AsyncWebServer server(WEBSERVPORT);
 SPRINKLERSYSTEM sprinklersystem(2,23,5000);
 WiFiUDP wifiUdp;
 NTP ntp(wifiUdp);
 void startup();                         // Pre-declaration for simplicity
 String sha1(String payloadStr);
+
+//////////////////////////////////////////////////////////////////////////
+//-Function-[clearLcrRow]------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void clearLcdRow(int row) {
+lcd.setCursor(0, row);
+for(int i=0; i< LCDROWS; i++){
+lcd.print(" ");
+}
+lcd.setCursor(0, row);
+}  
+//-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[getContentType]---------------------------------------------]
@@ -134,8 +151,12 @@ void writeConfigFile(char* value, const char* filename, const char* parameter){
 
 // FUNCTION - [loadConfig] - [Returns the current version from the Object--------]
 void loadConfig(){
-Serial.print(F("LOADCFG: "));
+clearLcdRow(3);
+clearLcdRow(1); 
+lcd.print("LOADCFG:");
+clearLcdRow(2);
 File file = SPIFFS.open("/system.cnf");
+lcd.print("/system.cnf");
 //while (file.available()) {
 //Serial.write(file.read());
 //}
@@ -173,28 +194,28 @@ File file = SPIFFS.open("/system.cnf");
 bool isAuth(AsyncWebServerRequest *request) {
   //Serial.println("In isAuth");
   if (request->hasHeader("Cookie")) {
-    Serial.print("Cookie: ");
+   // Serial.print("Cookie: ");
     String cookie = request->header("Cookie");
-    Serial.println(cookie);
+   // Serial.println(cookie);
     char user[20];
     getCookieUser(user,request->header("Cookie").c_str());
-    Serial.print("USER ");  
-    Serial.println(user); 
+  //  Serial.print("USER ");  
+ //   Serial.println(user); 
     char filepwd[50];
     readConfigFile(filepwd,"/accounts.cnf",user);
-    Serial.print("PWD ");
+ //   Serial.print("PWD ");
     String convFilePwd = filepwd;
-    Serial.println(convFilePwd);
+ //   Serial.println(convFilePwd);
     String cookieUser = user;
     String token = sha1(String(cookieUser) + ":" +      
     String(convFilePwd) + ":" + 
     request->client()->remoteIP().toString());
     if (cookie.indexOf("SESSIONID=" + token) != -1) {
-      Serial.println(F("Auth pass"));
+ //     Serial.println(F("Auth pass"));
       return true;
     }
   }
-  Serial.println("Auth Fail");
+  //Serial.println("Auth Fail");
   return false;
 }
 //-----------------------------------------------------------------------]
@@ -204,9 +225,9 @@ bool isAuth(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 bool handleFileRead(AsyncWebServerRequest *request, String path) {
   //Serial.print(F("handleFileRead: "));
-  Serial.println(path);
+  //Serial.println(path);
   if (!isAuth(request)) {
-    Serial.println(F("->login"));
+    //Serial.println(F("->login"));
     path = "/login.html";
   } 
   else {
@@ -235,12 +256,12 @@ bool handleFileRead(AsyncWebServerRequest *request, String path) {
       }
     }
     response->addHeader("Cache-Control", "no-cache");  
-    Serial.print("Path-> ");
-    Serial.println(path);
+    //Serial.print("Path-> ");
+   // Serial.println(path);
     request->send(response);
     return true;
   }
-    Serial.println("\tNot Found: " + path);
+    //Serial.println("\tNot Found: " + path);
     return false;  
 }
 //-----------------------------------------------------------------------]
@@ -272,7 +293,7 @@ void handleLogin(AsyncWebServerRequest *request) {
   if (request->hasHeader("Cookie")) {
     //Serial.print("Found cookie: ");
     String cookie = request->header("Cookie");
-    Serial.println(cookie);
+    //Serial.println(cookie);
     //List all parameters (Compatibility)
     //int args = request->args();
     //for(int i=0;i<args;i++){
@@ -294,14 +315,14 @@ void handleLogin(AsyncWebServerRequest *request) {
     char filepwd[50];
     readConfigFile(filepwd,"/accounts.cnf",user.c_str());
     String convFilePwd = filepwd;
-    Serial.print("PWD is: ");     Serial.println(filepwd);
+    //Serial.print("PWD is: ");     Serial.println(filepwd);
     if (convFilePwd == request->arg("password")){
       AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
       response->addHeader("Location", "/");
       response->addHeader("Cache-Control", "no-cache");
       String token = sha1(request->arg("username") + ":" + convFilePwd + ":" + request->client()->remoteIP().toString());
       //Serial.print("Token: ");
-      Serial.println(token);
+      //Serial.println(token);
       response->addHeader("Set-Cookie", "SESSIONID=" + token);
       response->addHeader("Set-Cookie", "USER=" + request->arg("username"));
       request->send(response);
@@ -321,7 +342,7 @@ void handleLogin(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleLogout]-----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleLogout(AsyncWebServerRequest *request) {
-  Serial.println("Dsco");
+  //Serial.println("Dsco");
   AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
   response->addHeader("Location", "/login.html?msg=User disconnected");
   response->addHeader("Cache-Control", "no-cache");
@@ -345,10 +366,10 @@ void handleCfgRoot(AsyncWebServerRequest *request) {
 void handleCheckStatus(AsyncWebServerRequest *request) {
     char result[20];
     readConfigFile(result,"/testresult.cnf","CONN");       
-    Serial.print(F("CONN-> ")); Serial.println(result);
+   // Serial.print(F("CONN-> ")); Serial.println(result);
     request->send(200, "text/html", result);
     if (strcmp(result,"SUCCESS") == 0){
-      Serial.println(F("Reboot to normal op"));
+    //  Serial.println(F("Reboot to normal op"));
       ESP.restart();
     }
 }
@@ -359,7 +380,7 @@ void handleCheckStatus(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 void handleUpdateConfig(AsyncWebServerRequest *request) {
   DynamicJsonDocument doc(1024);
-  char *filename = "/programmes.cnf";
+  const char *filename = "/programmes.cnf";
   deserializeJson(doc, request->arg("testval").c_str());
   if (request->arg("filetype") == "cfg") {
     filename = "/system.cnf";
@@ -388,13 +409,13 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 void handleGetconf(AsyncWebServerRequest *request) {
   char user[20];
-  char *filename = "/programmes.cnf";
+  const char *filename = "/programmes.cnf";
     if (request->arg("filetype") == "cfg") {
       filename = "/system.cnf";
     }
   getCookieUser(user,request->header("Cookie").c_str());
-  Serial.print("USER ");
-  Serial.println(user);
+  //Serial.print("USER ");
+  //Serial.println(user);
   if (strcmp(user,"admin")==0){
       request->send(SPIFFS, filename);      
   }
@@ -443,7 +464,7 @@ void serverRouting() {
   server.onNotFound([](AsyncWebServerRequest *request) {  // If the client requests any URI
     if (!handleFileRead(request, request->url())){        // send it if it exists
       handleNotFound(request); // respond 404 
-      Serial.println(request->url());
+   //   Serial.println(request->url());
     }
   });
   server.serveStatic("/configuration.json", SPIFFS, "/configuration.json", "no-cache, no-store, must-revalidate");
@@ -457,7 +478,7 @@ void serverRouting() {
 void handleWifiConnect(AsyncWebServerRequest *request) { 
   File testfile = SPIFFS.open("/testnetwork.cnf","w");
   if (!testfile){
-      Serial.print(F("open testnetwork file err"));
+   //   Serial.print(F("open testnetwork file err"));
       return;  
   }
   AsyncWebParameter* p = request->getParam(0);
@@ -493,32 +514,32 @@ void configNetwork() {
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(ssid);
   IPAddress myIP = WiFi.softAPIP();
-  Serial.print("AP IP:   ");
-  Serial.println(myIP);
+  //Serial.print("AP IP:   ");
+  //Serial.println(myIP);
   if (!MDNS.begin(deviceName)){
-    Serial.print(F("Error starting mDNS"));
+  //  Serial.print(F("Error starting mDNS"));
   }
   if (SPIFFS.exists("/testnetwork.cnf")){
     char ssid[50]; 
     readConfigFile(ssid,"/testnetwork.cnf","SSID");         
-    Serial.print(F("Try with SSID-> ")); Serial.println(ssid);
+   // Serial.print(F("Try with SSID-> ")); Serial.println(ssid);
     char key[50];
     readConfigFile(key,"/testnetwork.cnf","PASSWORD");
     if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
     File resultfile = SPIFFS.open("/testresult.cnf","w");
     if (!resultfile){
-      Serial.print("Open testresult file err");
+    //  Serial.print("Open testresult file err");
       return;  
     }    
     WiFi.begin(ssid,key);
     int i =0; 
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
-      Serial.print(".");
+    //  Serial.print(".");
       sprinklersystem.statusLedBlink(1,100);
       i++;
       if (i==15){
-        Serial.print("\nWifi Conn. Failed, Restarting\n");
+      //  Serial.print("\nWifi Conn. Failed, Restarting\n");
         delay(100);
         SPIFFS.remove("/testnetwork.cnf");
         resultfile.println("{\"CONN\":\"FAIL\"}");
@@ -530,7 +551,7 @@ void configNetwork() {
     resultfile.println("{\"CONN\":\"SUCCESS\"}");
     resultfile.close();
     SPIFFS.rename("/testnetwork.cnf", "/network.cnf");
-    Serial.println(WiFi.localIP());
+   // Serial.println(WiFi.localIP());
   }
   server.on("/", HTTP_GET , handleCfgRoot);
 }
@@ -542,36 +563,47 @@ void configNetwork() {
 void loadNetwork() {
     char ssid[50]; 
     readConfigFile(ssid,"/network.cnf","SSID");
-    Serial.print("    SSID -> "); Serial.println(ssid);
+    clearLcdRow(2);
+    lcd.print("Connecting");
+    clearLcdRow(3);
     char key[50];
     readConfigFile(key,"/network.cnf","PASSWORD");  
     if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
     WiFi.begin(ssid,key);
     int i =0;
-    Serial.print("Waiting.");
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
-      Serial.print(".");
+      lcd.print(".");
       sprinklersystem.statusLedBlink(1,100);
       i++;
       if (i==15){
-        Serial.print("\nNETWORK: Wifi Conn. Failed, Restart\n");
+        clearLcdRow(2);
+        lcd.print("Connect Fail");
+        clearLcdRow(3);
+        lcd.print("Restart....");
         delay(100);     
         startup();        
     }
   }
   sprinklersystem.statusLedBlink(1,0);
+  clearLcdRow(3);
   if (!MDNS.begin(deviceName)){
-    Serial.print("\nmDNS:    Error Starting.");
+    lcd.print("mDNS: Error Starting.");
   }
   else {
-    Serial.print("\nmDNS:    Listed as ");Serial.print(deviceName); Serial.println(".local");
-  }  
-  Serial.print("NETWORK: Connected at "); Serial.println(WiFi.localIP());
+    lcd.print(deviceName); lcd.print(".local");
+  }
+  clearLcdRow(2);
+  lcd.print(WiFi.localIP());
+  delay(1000);  
   ntp.begin();
-  Serial.print("NTP:     ");
-  Serial.println(ntp.formattedTime("%d. %B %Y  %T")); // dd. Mmm yyyy
-  //Serial.println(ntp.formattedTime("%T")); // dd. Mmm yyyy
+  clearLcdRow(1);
+  lcd.print("NTP: ");
+  //if(ntp.formattedTime("%d. %B %Y  %T")); // dd. Mmm yyyy
+  if(ntp.formattedTime("%d. %B %Y  %T")){
+    lcd.print("OK");
+  }
+  else {lcd.print("FAIL");}
 }
 //-----------------------------------------------------------------------]
 
@@ -580,10 +612,10 @@ void acctMgr(const char* action,const char* account,const char* val){
  if(!SPIFFS.exists("/accounts.cnf")){
     File accountfile = SPIFFS.open("/accounts.cnf","w");
     if (!accountfile){
-      Serial.print("wri err!");
+    //  Serial.print("wri err!");
       return;  
     }
-    if ((action == "inspect")&&(account =="admin")&&(val=="0")){
+    if ((strcmp(action,"inspect")==0) && (strcmp(account,"admin")==0) && (strcmp(val,"0")==0)){
       accountfile.println("{\"admin\":\"password\"}"); 
       accountfile.close();
     } 
@@ -599,10 +631,10 @@ void acctMgr(const char* action,const char* account,const char* val){
  //     permfile.close();
  //   }  
 // }
-    Serial.println("USERS:   Created account file with default admin");
+  //  Serial.println("USERS:   Created account file with default admin");
     return;
  }
-  Serial.println("USERS:   Account file exists");
+ // Serial.println("USERS:   Account file exists");
 }
 // ----------------------------------------------------------------------------]
 
@@ -613,11 +645,11 @@ void startup(){
   sprinklersystem.factoryDefaultChk();
   acctMgr("inspect","admin","0");
   if (SPIFFS.exists("/network.cnf")){
-     Serial.println("NETWORK: Already configured, Loading");
+     lcd.print("NETWK: Loading");
      loadNetwork();
   }
   else {
-     Serial.println("NETWORK: Setting up for initial config");   
+     lcd.print("NETWK: No Config");   
      configNetwork();    
   }
   server.on("/getWifiList",  HTTP_GET, handleWifiList);
@@ -625,9 +657,17 @@ void startup(){
   server.on("/checkStatus",  HTTP_GET, handleCheckStatus); 
   serverRouting();
   server.begin();
-  Serial.print("WEBSVR:  Port ");Serial.println(WEBSERVPORT);
+  lcd.print(" WEBPORT: ");lcd.print(WEBSERVPORT);
+  delay(2000);
   if (SPIFFS.exists("/system.cnf")){
     loadConfig();
+    delay(500);
+   clearLcdRow(3);
+   lcd.print("PROCESS COMPLETE");
+   
+   //if (!sprinklersystem.addZone(18,"jordan")){
+   //    Serial.print(sprinklersystem.addZone(19,"jordan"));
+  ///}
    
    /*
    sprinklersystem.zoneInfo();
@@ -669,13 +709,21 @@ void startup(){
 //////////////////////////////////////////////////////////////////////////
 void setup() {
   Serial.begin(115200);
-  Serial.println(F("\n\n***Rubin Projects Boot Framework***\n   technocoma.blogspot.com 2021\n"));
+  lcd.begin(LCDROWS, LCDCOLS);
+  lcd.home();
+  lcd.clear();
+  lcd.setBacklight(10);
+  lcd.print("    \nRubinTech\n");
+  lcd.setCursor(0, 1);
+  lcd.print("  Boot  Framework");
+  lcd.setCursor(0, 2);
   if(!sprinklersystem.startSpiffFs()){
-      Serial.println("SPIFFS: Mount err.");
+      lcd.print("SPIFFS: Mount err.");
       return;
   } 
-  else {Serial.println("SPIFFS:  Mounted");}
+  else {lcd.print("SPIFFS:  Mounted");}
   //SPIFFS.remove("/accounts.cnf");
+  lcd.setCursor(0, 3);
   startup();
 }
 

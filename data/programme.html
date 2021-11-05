@@ -154,6 +154,20 @@ function getConf(){
                     }
                   /////////////
                    console.log(data);
+                   document.getElementById("stA").value = data.programa[0];
+                   document.getElementById("stB").value = data.programb[0];
+                   document.getElementById("stC").value = data.programc[0];
+                   for (i = 1; i < 4; i++) {
+                    //program = "A";
+                    //if(i==2){program ="B"};
+                    //if(i==3){program ="C"};
+                    for (j = 1; j < 8; j++) { 
+                      if (i==1){document.getElementById("A-"+j).checked = data.programa[j];}
+                      if (i==2){document.getElementById("B-"+j).checked = data.programb[j];}
+                      if (i==3){document.getElementById("C-"+j).checked = data.programc[j];}
+                    }
+                  }
+                   //document.getElementById(program+"-"+j).checked
                   /////////////  
                   }
                 };
