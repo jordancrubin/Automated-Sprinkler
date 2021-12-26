@@ -21,8 +21,8 @@
 class SPRINKLERSYSTEM
 {
   ////////////// user-accessible "public" interface
-  public:
-  SPRINKLERSYSTEM(int,int,int);   
+  public: 
+  SPRINKLERSYSTEM(int);   
 class Zone {
   public:
     Zone(int, const char*);
@@ -38,13 +38,12 @@ class Zone {
     Zone * storedZones[12];
     int maxZones = 12;
     int LED;
-    int FACDEFPIN;
-    int FACDEFDELAY;
     void addMeter(int,bool,char,long,bool,double);
     void addValve(int,int,int,bool); 
     const char* addZone(int intval, char* charval);
     void closeZone(const char*);
     void factoryDefaultChk();
+    void facdef();
     bool meterMoved(void); 
     void openZone(const char*); 
     double readMeter(char);

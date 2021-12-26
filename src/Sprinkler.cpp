@@ -10,13 +10,11 @@
 
 //CONSTRUCTOR -----------------------------------------------------------------]
 //SPRINKLERSYSTEM SPRINKLERSYSTEM(int statusled, int facdefPin)
-SPRINKLERSYSTEM::SPRINKLERSYSTEM(int statusled, int facdefPin, int facdefDelay)
+//SPRINKLERSYSTEM::SPRINKLERSYSTEM(int statusled, int facdefPin, int facdefDelay)
+SPRINKLERSYSTEM::SPRINKLERSYSTEM(int statusled)
 {
   this->LED=statusled;
-  this->FACDEFPIN=facdefPin;
-  this->FACDEFDELAY=facdefDelay;
-  pinMode(LED,OUTPUT);
-  pinMode(facdefPin, INPUT);
+    pinMode(LED,OUTPUT);
 }
 // ----------------------------------------------------------------------------]
 
@@ -101,34 +99,11 @@ void SPRINKLERSYSTEM::closeZone(const char* name){
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [factoryDefaultChk] - [Factory Defaults the whole unit ----------]
-void SPRINKLERSYSTEM::factoryDefaultChk(){
-    double now = millis();
-    while (digitalRead(FACDEFPIN)){
-      if ((millis()-now) >= FACDEFDELAY){
-        Serial.println(F("Defaulting unit!"));
-        SPIFFS.remove("/network.cnf");
-        SPIFFS.remove("/testresult.cnf");
-        SPIFFS.remove("/testnetwork.cnf");
-        SPIFFS.remove("configuration.json");
-        SPIFFS.remove("/accounts.cnf");
-        SPIFFS.remove("/system.cnf");
-      //  lcd.print("Restart....");
-        this->statusLedBlink(30,20);
-        ESP.restart();
-        break;
-      }
-   }  
-}
-// ----------------------------------------------------------------------------]
-
 // PRIVATE - [getIndex] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx---------]
 int SPRINKLERSYSTEM::getIndex(const char* name){
   int returnIndex = 99; // try -1
   for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
     if(storedZones[i]){
-//Serial.println(storedZones[i]->thisname);
-//Serial.println(name);
       if (strcmp(storedZones[i]->thisname,name)==0){ 
         returnIndex = i;
         return returnIndex;

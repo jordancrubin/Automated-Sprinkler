@@ -9,6 +9,15 @@
 #define WEBSERVPORT 80
 #define LCDROWS 20
 #define LCDCOLS 4
+#define LCDI2C 0x27
+#define FACDEFPIN 23
+#define FACDEFDELAY 5000
+#define ESP32LED 2
+#define ROTARY_ENCODER_A_PIN 32
+#define ROTARY_ENCODER_B_PIN 4
+#define ROTARY_ENCODER_BUTTON_PIN 33
+#define ROTARY_ENCODER_STEPS 4
+#define ROTARY_ENCODER_VCC_PIN -1
 #include <Arduino.h>
 #include <LiquidCrystal_PCF8574.h> 
 #include <Wire.h> 
@@ -18,24 +27,28 @@
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
-#include <NTP.h>
 #include <Sprinkler.h>
 #include <ArduinoJson.h>
+#include "AiEsp32RotaryEncoder.h"
 #include "mbedtls/md.h"
+#include "time.h"
+//#include <cstdlib>
 
-const char* ssid = "sprinklersystem";    //SSID of the netconfig Access point
+const char* ssid = "sprinklernet";    //SSID of the netconfig Access point
 const char* deviceName = "sprinkler32";  //Mdns name sprinkler32.local
+double lastTimepoll = -60000;
+const char* ntpServer = "pool.ntp.org";
+struct tm timeinfo;
 
-LiquidCrystal_PCF8574 lcd(0x27); 
+LiquidCrystal_PCF8574 lcd(LCDI2C); 
 AsyncWebServer server(WEBSERVPORT);
-SPRINKLERSYSTEM sprinklersystem(2,23,5000);
-WiFiUDP wifiUdp;
-NTP ntp(wifiUdp);
+AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
+SPRINKLERSYSTEM sprinklersystem(ESP32LED);
 void startup();                         // Pre-declaration for simplicity
 String sha1(String payloadStr);
 
 //////////////////////////////////////////////////////////////////////////
-//-Function-[clearLcrRow]------------------------------------------------]
+//-FUNCTION-[clearLcrRow]------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void clearLcdRow(int row) {
 lcd.setCursor(0, row);
@@ -157,11 +170,13 @@ lcd.print("LOADCFG:");
 clearLcdRow(2);
 File file = SPIFFS.open("/system.cnf");
 lcd.print("/system.cnf");
-//while (file.available()) {
-//Serial.write(file.read());
-//}
-//file.close();
-//  file = SPIFFS.open("/system.cnf");
+///////////////
+while (file.available()) {
+  Serial.write(file.read());
+}
+file.close();
+/////////////
+  file = SPIFFS.open("/system.cnf");
   DynamicJsonDocument doc(1024);
   deserializeJson(doc, file);
   file.close();
@@ -185,6 +200,10 @@ lcd.print("/system.cnf");
     sprinklersystem.addZone(atoi(gpio),newname);
     sprinklersystem.setDescription(name,newdesc);
   }
+   const char* tzData = doc["timez"];
+   setenv("TZ", tzData, 1 );
+   tzset();
+
 }
 // ----------------------------------------------------------------------------]
 
@@ -308,7 +327,6 @@ void handleLogin(AsyncWebServerRequest *request) {
     request->send(response);
     return;
   }
-
   else {
     //Serial.print("Found param: ");
 //condense here
@@ -342,7 +360,6 @@ void handleLogin(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleLogout]-----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleLogout(AsyncWebServerRequest *request) {
-  //Serial.println("Dsco");
   AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
   response->addHeader("Location", "/login.html?msg=User disconnected");
   response->addHeader("Cache-Control", "no-cache");
@@ -511,6 +528,14 @@ void handleWifiList(AsyncWebServerRequest *request) {
 //-FUNCTION-[configNetwork]----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void configNetwork() { 
+  lcd.clear();
+  lcd.print("    \nRubinTech\n");
+  clearLcdRow(1);
+  lcd.print("WIFI: sprinklernet");
+  clearLcdRow(2);
+  lcd.print("Configure at");
+  clearLcdRow(3);
+  lcd.print(deviceName);lcd.print(".local");
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(ssid);
   IPAddress myIP = WiFi.softAPIP();
@@ -595,15 +620,18 @@ void loadNetwork() {
   }
   clearLcdRow(2);
   lcd.print(WiFi.localIP());
-  delay(1000);  
-  ntp.begin();
+  delay(1000);
   clearLcdRow(1);
   lcd.print("NTP: ");
-  //if(ntp.formattedTime("%d. %B %Y  %T")); // dd. Mmm yyyy
-  if(ntp.formattedTime("%d. %B %Y  %T")){
-    lcd.print("OK");
+  configTime(0, 0, ntpServer);
+  if (getLocalTime(&timeinfo)){
+    lcd.print("OK"); 
   }
-  else {lcd.print("FAIL");}
+  else {
+    lcd.print("FAILED");
+    delay(1000);
+    ESP.restart();
+  }
 }
 //-----------------------------------------------------------------------]
 
@@ -639,10 +667,48 @@ void acctMgr(const char* action,const char* account,const char* val){
 // ----------------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
+//-TASK-[everyMinute]----------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void everyMinute(void * parameter){
+  for (;;){
+    if ((millis()-lastTimepoll) >= 60000){
+      lastTimepoll = millis();
+      lcd.home();
+      lcd.clear();
+      //struct tm timeinfo;
+      getLocalTime(&timeinfo);
+      lcd.print(&timeinfo, "%A %H:%M");
+
+
+    }
+  }
+}
+//-----------------------------------------------------------------------]  
+
+//////////////////////////////////////////////////////////////////////////
+//-TASK-[rotaryLoop]-----------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void rotaryLoop(void * parameter)
+{
+  for(;;){
+	  //dont print anything unless value changed
+	  if (rotaryEncoder.encoderChanged())
+	  {
+		  Serial.print("Value: ");
+		  Serial.println(rotaryEncoder.readEncoder());
+	  }
+	  if (rotaryEncoder.isEncoderButtonClicked())
+	  {
+		  Serial.println("CLICK");
+	  }
+  }
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-SYSTEM-[startup]------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void startup(){
-  sprinklersystem.factoryDefaultChk();
   acctMgr("inspect","admin","0");
   if (SPIFFS.exists("/network.cnf")){
      lcd.print("NETWK: Loading");
@@ -657,50 +723,66 @@ void startup(){
   server.on("/checkStatus",  HTTP_GET, handleCheckStatus); 
   serverRouting();
   server.begin();
-  lcd.print(" WEBPORT: ");lcd.print(WEBSERVPORT);
   delay(2000);
   if (SPIFFS.exists("/system.cnf")){
     loadConfig();
     delay(500);
-   clearLcdRow(3);
-   lcd.print("PROCESS COMPLETE");
-   
-   //if (!sprinklersystem.addZone(18,"jordan")){
-   //    Serial.print(sprinklersystem.addZone(19,"jordan"));
-  ///}
-   
-   /*
-   sprinklersystem.zoneInfo();
-   sprinklersystem.zoneInfo("first zone");
-   sprinklersystem.zoneInfo();
-   sprinklersystem.zoneInfo("second zone");
-   sprinklersystem.zoneInfo();
-   sprinklersystem.zoneInfo("third zone");
-   sprinklersystem.zoneInfo();
-   sprinklersystem.zoneInfo("fourth zone");
-
-   sprinklersystem.openZone("first zone");
-   delay(2000);
-   sprinklersystem.closeZone("first zone");
-   delay(2000);
-   sprinklersystem.openZone("second zone");
-   delay(2000);
-   sprinklersystem.closeZone("second zone");
-   delay(2000);
-   sprinklersystem.openZone("third zone");
-   delay(2000);
-   sprinklersystem.closeZone("third zone");
-   delay(2000);
-   sprinklersystem.openZone("fourth zone");
-   delay(2000);
-   sprinklersystem.closeZone("fourth zone");
-   delay(2000);
-
-    sprinklersystem.zoneInfo();  
- 
-
-*/
+    clearLcdRow(3);
+    if (!SPIFFS.exists("/programmes.cnf")){
+      lcd.print("CONFIG INCOMPLETE");
+    } 
+    else {
+      lcd.print("PROCESS COMPLETE");
+      delay(1000);
+      TaskHandle_t everyminutehandle = NULL;
+      TaskHandle_t rotaryLoophandle = NULL;
+      xTaskCreatePinnedToCore(everyMinute,"everyminutetask",1800,NULL,1,&everyminutehandle,1);
+      xTaskCreatePinnedToCore(rotaryLoop,"rotaryLooptask",1800,NULL,1,&rotaryLoophandle,1);
+      everyMinute(nullptr);
+    }   
   }  
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-TASK-[facdefMonitor]--------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void facdefMonitor(void * parameter){
+  for(;;){
+    double now = millis();
+    while (digitalRead(FACDEFPIN) == LOW){
+      if ((millis()-now) >= FACDEFDELAY){ 
+        clearLcdRow(1);
+        clearLcdRow(3);
+        clearLcdRow(2);  
+        lcd.print("Defaulting unit!");
+        SPIFFS.remove("/network.cnf");
+        SPIFFS.remove("/testresult.cnf");
+        SPIFFS.remove("/testnetwork.cnf");
+        SPIFFS.remove("configuration.json");
+        SPIFFS.remove("/accounts.cnf");
+        SPIFFS.remove("/system.cnf");
+        SPIFFS.remove("/programmes.cnf");
+        clearLcdRow(1);
+        clearLcdRow(2);
+        clearLcdRow(3);
+        lcd.print("DEFAULTED!!!!");
+        delay(2000);
+        ESP.restart();
+        break; //NECESSARY?
+      }
+   }  
+  delay (2000);
+  }
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-TASK-[readEncoderISR]-------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void IRAM_ATTR readEncoderISR()
+{
+	rotaryEncoder.readEncoder_ISR();
 }
 //-----------------------------------------------------------------------]
 
@@ -709,7 +791,13 @@ void startup(){
 //////////////////////////////////////////////////////////////////////////
 void setup() {
   Serial.begin(115200);
+  TaskHandle_t facdefhandle = NULL;
+  pinMode(FACDEFPIN, INPUT_PULLUP);
   lcd.begin(LCDROWS, LCDCOLS);
+  rotaryEncoder.begin();
+  rotaryEncoder.disableAcceleration();
+	rotaryEncoder.setup(readEncoderISR);
+  xTaskCreatePinnedToCore(facdefMonitor,"facdeftask",1800,NULL,1,&facdefhandle,1);
   lcd.home();
   lcd.clear();
   lcd.setBacklight(10);
@@ -728,15 +816,8 @@ void setup() {
 }
 
 //////////////////////////////////////////////////////////////////////////
-//-SYSTEM-[loop]---------------------------------------------------------]
+//-SYSTEM-[loop]--------------------STAYS EMPTY--------------------------]
 //////////////////////////////////////////////////////////////////////////
 void loop() {
-  sprinklersystem.factoryDefaultChk();
-  if(sprinklersystem.meterMoved()){
-     Serial.print(sprinklersystem.readMeter());
-     Serial.print("gallons, in litres -> ");
-     Serial.println(sprinklersystem.readMeter('l'));
-   }
-  delay(5000);
 }
 //-----------------------------------------------------------------------]
