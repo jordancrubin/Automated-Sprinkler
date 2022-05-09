@@ -36,8 +36,7 @@
         var child = $(this).closest('tr').nextAll();
         //var ct =1;
         var thisrow = child.prevObject[0].attributes.id.value;
-        thisrow = parseInt(thisrow.substring(1));
-        //console.log(thisrow);  
+        thisrow = parseInt(thisrow.substring(1));  
         delete progOb[thisrow];
         thisrow++; 
         while (thisrow < 9) {// loop from thisrow to 8
@@ -85,18 +84,25 @@
         d = document.getElementById("valveOpenGpio").value; gpios.push(d); wkflw.valopio = d;
         e = document.getElementById("valveCloseGpio").value; gpios.push(e); wkflw.valclio = e;
         f = document.getElementById("valveRelayGpio").value; gpios.push(f); wkflw.valrlyio = f;
+        g = document.getElementById("rainSenseGpio").value; gpios.push(g); wkflw.rainsens = g;
         wkflw.zones = zones;
         if (a!=b){err.push('The admin password did not match the re-typed password.');}
         if (cnftype ==1){
           if(a.length < 8){err.push('The admin password must be a minimum of 8 characters.');}
         }
-        t = document.getElementById("timezone").value; wkflw.timez = t;
+        var sel = document.getElementById("timezone");
+        var opt = sel.options[sel.selectedIndex];
+        t = opt.value; wkflw.timez = t;
+        tn = opt.text; wkflw.timezname = tn;
         if (!t){err.push('A timezone must be choosen.');}
         if ((c<1) || (c>40)) {err.push('The Metre GPIO value is out of bounds.');} 
         if ((d<1) || (d>40)) {err.push('The Valve Open GPIO value is out of bounds.');} 
         if ((e<1) || (e>40)) {err.push('The Valve Closed value is out of bounds.');} 
         if ((f<1) || (f>40)) {err.push('The Valve Relay value is out of bounds.');} 
         if ((r<5) || (r>999)) {err.push('Meter debounce [ms] is beyond params');}
+        if (g){
+          if ((g<1) || (g>40)) {err.push('The Rain Sensor GPIO value is out of bounds.');} 
+        }
         if (!s) {err.push('Metre Increment should be the flwo value of each pulse');}
         var inc = 1;
         for (var z = 1; z < counter; z++) {
@@ -104,8 +110,7 @@
             g= document.getElementById("zoneGpio"+z).value; gpios.push(g); thiszone.push(g);
             h= document.getElementById("zoneName"+z).value; thiszone.push(h); znames.push(h);
             i= document.getElementById("zoneDesc"+z).value; thiszone.push(i);
-            if (cnftype == 1){thiszone.push(0);thiszone.push(0);thiszone.push(0);}
-//if (cnftype == 1){thiszone.push(z);thiszone.push(z);thiszone.push(z);}     
+            if (cnftype == 1){thiszone.push(0);thiszone.push(0);thiszone.push(0);}    
             else {
               if (typeof progOb[z] != "undefined") {thiszone.push(progOb[z].A); console.log(progOb[z].A);} 
                else {thiszone.push(0);}
@@ -161,7 +166,6 @@
       console.log(jsonstr);
       xhr.open("POST", "updateConfig", true);
       xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-      //xhr.send("testval="+jsonstr+""); 
       xhr.send("testval="+jsonstr+"&filetype=cfg"); 
     }
     document.getElementById('errorContent').innerHTML = msg;
@@ -187,6 +191,15 @@ function getConf(){
                   document.getElementById("metreMeasureL").checked = true;
                 }
                 else {document.getElementById("metreMeasureG").checked = true;}
+                var selectTz = document.getElementById('timezone');
+                console.log("DATATIMEZ "+data.timez);
+                console.log("TIMEZNAME "+data.timezname);
+                for (var opt, j = 0; opt = selectTz[j]; j++) {
+                  if (data.timezname ==  selectTz[j].text){
+                    selectTz.options.selectedIndex = j;
+                    console.log(selectTz[j].value);
+                  }
+                }  
                 document.getElementById("valveOpenGpio").value = data.valopio;
                 document.getElementById("valveCloseGpio").value = data.valclio;
                 document.getElementById("valveRelayGpio").value = data.valrlyio;
@@ -198,6 +211,9 @@ function getConf(){
                   document.getElementById("zoneGpio"+counter).value = zone[0];
                   document.getElementById("zoneName"+counter).value = zone[1];
                   document.getElementById("zoneDesc"+counter).value = zone[2]; 
+                  if (data.rainsens){
+                    document.getElementById("rainSenseGpio").value = data.rainsens;
+                  }
                   progOb[counter] = {};
                   progOb[counter].A = zone[3];
                   progOb[counter].B = zone[4];

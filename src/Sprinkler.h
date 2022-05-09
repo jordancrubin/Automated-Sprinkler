@@ -3,11 +3,12 @@
   this uses the libraries from the water meter and ball valve
   project.
   https://www.youtube.com/c/jordanrubin6502
-  2021 Jordan Rubin.
+  2022 Jordan Rubin.
 */
 #include <Ballvalve.h>
 #include <Watermeter.h>
 #include <SPIFFS.h>
+#include <ArduinoJson.h>
 // ensure this library description is only included once
 #ifndef Sprinkler_h
 #define Sprinkler_h
@@ -26,33 +27,71 @@ class SPRINKLERSYSTEM
 class Zone {
   public:
     Zone(int, const char*);
-    const char* thisname;
-    int gpio;
     const char* description;
-    char* statusMsg;
+    int duration;
+    int gpio;
     bool open;
-    bool enabled;
+    char* statusMsg;
+    const char* thisname;
 };
     FIVEWIREVALVE * thisvalve;
     WATERMETER * flowmeter;
     Zone * storedZones[12];
-    int maxZones = 12;
+    bool active;
+    bool canceled; 
+    double consumption;  
+    int days[7] = { 0 };
+    const char * enabled;
+    bool hasRainsensor;
     int LED;
+    bool inManual;
+    int maxZones = 12;
+    char measure;
+    int program;
+    int rainSensorGpio;
+    int startTime;
+    int backupStartTime;
+    int zoneCount = 0;
+    int zoneRemaining;
     void addMeter(int,bool,char,long,bool,double);
+    void addRainSensor(int);
     void addValve(int,int,int,bool); 
     const char* addZone(int intval, char* charval);
+    void cancelManual(void);
+    void clearEnabled();
     void closeZone(const char*);
-    void factoryDefaultChk();
     void facdef();
+    void factoryDefaultChk();
+    char getMeasureType();
+    int getProgram();
+    const char * getSchedZone(int);
+    int getZoneCount();
+    void getZoneNames(char (& Array)[12][20]);
+    int getZoneRemaining();
+    void info();
+    bool isActive();
+    bool isCanceled();
+    const char* isEnabled(void);
+    bool isSchedForToday(tm *);
+    bool isTodayComplete(tm *);
     bool meterMoved(void); 
-    void openZone(const char*); 
-    double readMeter(char);
-    double readMeter(void);
+    void offsetManual(const char *, tm *);
+    void openZone(const char*);
+    double readConsumption(); 
+    double readMeter(char);/////////////////////////// huh
+    double readMeter(void);///////////////////////////// huh
     void removeZone(const char*);
+    bool runZone(const char*);
+    void setCanceled(bool);
+    void setConsumption(void);
     void setDescription(const char*, const char*);
-    const char* setValve(char*);
+    void setProgram(int);
+
+    const char* setValve(const char*);
+    
     bool startSpiffFs();
     void statusLedBlink(int,int);
+    int timeToProgStart(tm *);
     int valveLastDuration(char*);
     int valveMaxTravelTime(void);
     void valveMaxTravelTime(int);
@@ -62,8 +101,8 @@ class Zone {
 
   ////////////// library-accessible "private" interface
   private:
-    int value;
     int getIndex(const char*);
     int getIndex(int);
+    int value;
   };
 #endif

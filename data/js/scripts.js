@@ -34,6 +34,59 @@ function getCookie(cname) {
     return "";
   }
 
+function updateStatus(){
+    var state = document.getElementById("state");
+    var stateinfo = document.getElementById("stateInfo");
+        console.log('update Status....');
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            var data = JSON.parse(this.responseText);
+        console.log(data);
+            if (data.state == "0"){
+              state.innerHTML="Programme is disabled.....";
+              stateinfo.innerHTML= "";
+            }
+            else if(data.state == "1"){
+              state.innerHTML="Sprinkler is Idle Today.....";
+              stateinfo.innerHTML= "";
+            }
+            else if(data.state == "2"){
+              state.innerHTML="Manual Cancellation Requested.....";
+              stateinfo.innerHTML= "";
+            }
+            else if(data.state == "3"){
+              state.innerHTML="Programme begins in.....";
+              if (data.info > 60){
+                var hours = Math.floor(data.info / 60);
+                var minutes = data.info%60;
+                stateinfo.innerHTML= hours+" hours "+minutes+" minutes";
+              }
+              else {
+                stateinfo.innerHTML= data.info+" minutes";
+              }
+            }
+            else if(data.state == "4"){
+              state.innerHTML="Todays schedule has completed.....";
+              stateinfo.innerHTML= "";
+            }
+            else if(data.state == "5"){
+              var minutes = data.info;
+              var zone = data.zone;
+              state.innerHTML="Zone "+zone+" - "+minutes+" minutes remain";
+              stateinfo.innerHTML= "Consumption 0.00g/min";
+              //line948 // line 420
+            }
+              else {
+              alert("Update error, try again...");
+            }
+        }
+    };  
+  xhr.open("POST", "updateStatus", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send(); 
+}
+
 function cookieChk(){
     var testsession = getCookie("SESSIONID");
     if (testsession == 0){
@@ -69,28 +122,44 @@ function LogoutDialogue() {
 function addSidebar() { 
 const content = `
 <div class="nav">
+<!--
 <div class="sb-sidenav-menu-heading">Core</div>
+-->
+
 <a class="nav-link" href="index.html">
     <div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>
     Dashboard
 </a>
+<!--
 <div class="sb-sidenav-menu-heading">Interface</div>
+
+ 
+
 <a class="nav-link collapsed" href="#" data-bs-toggle="collapse" data-bs-target="#collapseLayouts" aria-expanded="false" aria-controls="collapseLayouts">
     <div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>
     Layouts
     <div class="sb-sidenav-collapse-arrow"><i class="fas fa-angle-down"></i></div>
 </a>
+
+
+
 <div class="collapse" id="collapseLayouts" aria-labelledby="headingOne" data-bs-parent="#sidenavAccordion">
     <nav class="sb-sidenav-menu-nested nav">
         <a class="nav-link" href="layout-static.html">Static Navigation</a>
         <a class="nav-link" href="layout-sidenav-light.html">Light Sidenav</a>
     </nav>
 </div>
+
+
+
 <a class="nav-link collapsed" href="#" data-bs-toggle="collapse" data-bs-target="#collapsePages" aria-expanded="false" aria-controls="collapsePages">
     <div class="sb-nav-link-icon"><i class="fas fa-book-open"></i></div>
     Pages
     <div class="sb-sidenav-collapse-arrow"><i class="fas fa-angle-down"></i></div>
 </a>
+
+
+
 <div class="collapse" id="collapsePages" aria-labelledby="headingTwo" data-bs-parent="#sidenavAccordion">
     <nav class="sb-sidenav-menu-nested nav accordion" id="sidenavAccordionPages">
         <a class="nav-link collapsed" href="#" data-bs-toggle="collapse" data-bs-target="#pagesCollapseAuth" aria-expanded="false" aria-controls="pagesCollapseAuth">
@@ -117,6 +186,9 @@ const content = `
         </div>
     </nav>
 </div>
+
+
+
 <div class="sb-sidenav-menu-heading">Addons</div>
 <a class="nav-link" href="charts.html">
     <div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>
@@ -128,6 +200,9 @@ const content = `
 </a>
 </div>
 </div>
+
+-->
+
 <div class="sb-sidenav-footer">
 <div class="small" id="username"></div>
 </div>
