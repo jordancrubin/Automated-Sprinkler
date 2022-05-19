@@ -95,6 +95,13 @@ void SPRINKLERSYSTEM::closeZone(const char* name){
 }
 // ----------------------------------------------------------------------------]
 
+// FUNCTION - [getDescription] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx---------]
+const char * SPRINKLERSYSTEM::getDescription(const char* name){
+  int myIndex = this->getIndex(name); 
+    return storedZones[myIndex]->description;
+}
+// ----------------------------------------------------------------------------]
+
 // PRIVATE - [getIndex] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx---------]
 int SPRINKLERSYSTEM::getIndex(const char* name){
   int returnIndex = -1;

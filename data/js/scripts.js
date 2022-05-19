@@ -34,6 +34,38 @@ function getCookie(cname) {
     return "";
   }
 
+/// updateZonelist()  For the manual run pf programmes  
+function updateZoneList() {
+var dropdown = document.getElementById('manualrunlist');     
+  var option;
+  dropdown.length = 0;
+  defaultOption = document.createElement('option');
+  defaultOption.text = "Refreshing Configured Zones";
+  dropdown.add(defaultOption);
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+console.log(data);
+      dropdown.length = 0;
+      defaultOption = document.createElement('option');
+      defaultOption.text = 'Choose a zone.....';
+      defaultOption.value = '';
+      dropdown.add(defaultOption);
+      dropdown.selectedIndex = 0;
+console.log(data.length)   
+      for (let i = 0; i < data.length; i++) {
+        option = document.createElement('option');      
+        option.text = data[i].val+" - "+data[i].name;
+        option.value = data[i].val;
+        dropdown.add(option);
+      }
+    }
+  };  
+  xhr.open("GET", "getZoneList", true);
+  xhr.send();
+}
+
 function updateStatus(){
     var state = document.getElementById("state");
     var stateinfo = document.getElementById("stateInfo");
@@ -41,8 +73,20 @@ function updateStatus(){
         var xhr = new XMLHttpRequest();
         xhr.onreadystatechange = function() {
         if (this.readyState == 4 && this.status == 200) {
-            var data = JSON.parse(this.responseText);
-        console.log(data);
+          var data = JSON.parse(this.responseText);
+          console.log(data);
+          if (data.valve == 'CLOSED'){
+            valveState.innerHTML="Valve is <font color='green'>Closed</font>";
+          }
+          else if(data.valve == 'OPEN'){
+            valveState.innerHTML="Valve is <font color='red'>Open</font>";
+          }
+          else if(data.valve == 'MIDWAY'){
+            valveState.innerHTML="Valve is <font color='orange'>Midway</font>";
+          }
+          else{
+            valveState.innerHTML="Valve Status <font color='blue'>Unknown</font>";
+          } 
             if (data.state == "0"){
               state.innerHTML="Programme is disabled.....";
               stateinfo.innerHTML= "";
@@ -73,8 +117,13 @@ function updateStatus(){
             else if(data.state == "5"){
               var minutes = data.info;
               var zone = data.zone;
-              state.innerHTML="Zone "+zone+" - "+minutes+" minutes remain";
-              stateinfo.innerHTML= "Consumption 0.00g/min";
+              if (minutes >1){
+                state.innerHTML="Zone "+zone+" - "+minutes+" minutes remain";
+              }
+              else {
+                state.innerHTML="Zone "+zone+" - "+minutes+" minute remains";
+              }
+                stateinfo.innerHTML= "Consumption 0.00g/min";
               //line948 // line 420
             }
               else {
@@ -91,7 +140,6 @@ function cookieChk(){
     var testsession = getCookie("SESSIONID");
     if (testsession == 0){
         console.log("redirect it");
-  //      location.replace("/login.html");
     }
 }
 
@@ -104,6 +152,34 @@ function getURLParameter(sParam){
             return sParameterName[1];
         }
     }
+}
+
+function manualRunListChange() {
+  var dropdown = document.getElementById('manualrunlist');
+  var value = dropdown.options[dropdown.selectedIndex].value;
+  var element = document.getElementById("manualrunbutton");
+ if (value == ''){
+    element.style.display = "none";
+ }
+  else{
+    element.style.display = "block";
+  }
+}
+
+
+function submitManualRun() {
+  var dropdown = document.getElementById('manualrunlist');
+  var value = dropdown.options[dropdown.selectedIndex].value;
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+  if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+      console.log(data);
+  }
+};  
+xhr.open("POST", "sendManual", true);
+xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+xhr.send("zone="+value); 
 }
 
 function LogoutDialogue() {
@@ -211,9 +287,7 @@ document.getElementById("sidenav-menu-content").innerHTML = content;
 document.getElementById("username").innerHTML = "Logged in as: "+getCookie("USER");
 }
 
-
 window.addEventListener('DOMContentLoaded', event => {
-
     // Toggle the side navigation
     const sidebarToggle = document.body.querySelector('#sidebarToggle');
     if (sidebarToggle) {
@@ -229,8 +303,6 @@ window.addEventListener('DOMContentLoaded', event => {
     }
 
 });
-
-
 
 var TZdata = [
     {

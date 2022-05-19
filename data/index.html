@@ -57,11 +57,22 @@
                                     <div class="card-body">
                                       <h5 class="card-title"><div id="state"></div></h5>
                                       <p class="card-text"><div id="stateInfo"></div></p>
+                                      <p class="card-text"><div id="valveState"></div></p>
                                     </div>
                                   </div>
                             </div>
-
-
+                        </div>
+                            <div class="row">
+                                <div class="col-xl-12 col-md-6">
+                                    <div class="card bg-light text-black mb-4">
+                                        <div class="card-body">
+                                          <h5 class="card-title">Manual Run</h5>
+                                          <p class="card-text"><div id="selectpicker"><select class="selectpicker" id="manualrunlist" onchange="manualRunListChange()"><option value="SELECTED">Choose one</option></select></div></p>
+                                          <p class="card-text"><div id="manualrunbutton"><input class="btn btn-success" type="button" value="Begin" onclick="submitManualRun()"></div></p>
+                                        </div>    
+                                    </div>
+                                </div>
+                            </div>
                         <div class="row">
                             <div class="col-xl-6">
                                 <div class="card mb-4">
@@ -72,14 +83,13 @@
                                     <div class="card-body"><canvas id="myAreaChart" width="100%" height="40"></canvas></div>
                                 </div>
                             </div>
-
                             <div class="col-xl-6">
                                 <div class="card mb-4">
                                     <div class="card-header">
                                         <i class="fas fa-chart-bar me-1"></i>
                                         Event Log
                                     </div>
-                                    <textarea class="form-control z-depth-1" id="exampleFormControlTextarea6" rows="19" placeholder="Write something here..."></textarea>
+                                    <textarea class="form-control z-depth-1" style="overflow:auto;" id="eventLog" rows="19"></textarea>
                                 </div>
                             </div>
 
@@ -258,8 +268,6 @@
                     </div>
                 </main>
 
-
-
                 <footer class="py-4 bg-light mt-auto">
                     <div class="container-fluid px-4">
                         <div class="d-flex align-items-center justify-content-between small">
@@ -285,9 +293,47 @@
 
 
     <script>
+        msgArray = [];
         addSidebar();
         getCurrentProg();
-        var statusInterval = setInterval(updateStatus, 5000);  
+        updateStatus();
+        updateZoneList();
+        var element = document.getElementById("manualrunbutton");
+        element.style.display = "none";
+        var statusInterval = setInterval(updateStatus, 5000);
+        if (!!window.EventSource) {
+            var source = new EventSource('/events');
+            source.addEventListener('open', function(e) {
+  console.log("Events Connected");
+ }, false);
+ source.addEventListener('error', function(e) {
+  if (e.target.readyState != EventSource.OPEN) {
+    console.log("Events Disconnected");
+  }
+ }, false);
+ 
+ source.addEventListener('message', function(e) {
+ //   var testnum = Math.floor(Math.random() * 10);
+  //  var test = testnum+"-"+e.data;
+   // msgArray.unshift(test);
+    msgArray.unshift(e.data);
+    if (msgArray.length == 20){
+        msgArray.pop();
+    }
+    console.log(msgArray);
+    var textarea = document.getElementById("eventLog");
+    textarea.value = msgArray.join("\n");
+    console.log("message", e.data);
+ }, false);
+ 
+
+ source.addEventListener('temperature', function(e) {
+  console.log("temperature", e.data);
+  document.getElementById("temp").innerHTML = e.data;
+ }, false);
+}
+
+
 
 ////////
         function LogoutDialogue() {
@@ -332,32 +378,21 @@
             xhr.onreadystatechange = function() {
             if (this.readyState == 4 && this.status == 200) {
                 var data = JSON.parse(this.responseText);
-                if (data.p){
-                  
+                if (data.p){                 
                     var prog = document.getElementById('activeprog');
                     console.log("current program: "+data.p);
                     for (var opt, j = 0; opt = prog[j]; j++) {
-                  if (data.p ==  prog[j].value){
-                    prog.options.selectedIndex = j;
-                    console.log(prog[j].value);
-                  }
-                }  
-
-
-
-
-
+                        if (data.p ==  prog[j].value){
+                            prog.options.selectedIndex = j;
+                            console.log(prog[j].value);
+                        }
+                    }  
                 }
-
             }
         };  
-      xhr.open("POST", "getProg", true);
-      xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-      xhr.send(); 
+            xhr.open("POST", "getProg", true);
+            xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+            xhr.send(); 
         }
-
-
-
         </script>
-
 </html>

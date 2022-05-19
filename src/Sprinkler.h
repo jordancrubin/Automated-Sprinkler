@@ -62,6 +62,7 @@ class Zone {
     void closeZone(const char*);
     void facdef();
     void factoryDefaultChk();
+    const char * getDescription(const char *);
     char getMeasureType();
     int getProgram();
     const char * getSchedZone(int);
