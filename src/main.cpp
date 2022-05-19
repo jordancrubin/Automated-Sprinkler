@@ -21,30 +21,30 @@
 #include "AiEsp32RotaryEncoder.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
-//#include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <LiquidCrystal_PCF8574.h> 
 #include "mbedtls/md.h"
 #include <SD.h>
 #include <Sprinkler.h>
-#include "time.h"
+#include <time.h>
 #include <Wire.h> 
 #include <WiFi.h>
 #include <WiFiAP.h>
 
 const char* deviceName = "sprinkler32";  //Mdns name sprinkler32.local
-int displayprogram = 0;
 double lastTimepoll = -60000;
 const char* ntpServer = "pool.ntp.org";
 const char* ssid = "sprinklernet";    //SSID of the netconfig Access point
 struct tm timeinfo;
 bool displayLock;
+int displayprogram = 0;
 int lastEncval;
-int menulevel = 0;
+int menulevel   = 0;
 int selectlevel = 0;
 int programMenu = -1;
 bool inManualProgram = false;
+bool setManualFlag = false;
 char selectedProgram[20];
 const char * menu[3][5] = {
   {"CANCEL PROGRAMME","START PROGRAMME","REBOOT UNIT","SW VERSION","EXIT MENU"},
@@ -53,6 +53,7 @@ const char * menu[3][5] = {
 
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
 AsyncWebServer server(WEBSERVPORT);
+AsyncEventSource events("/events");
 LiquidCrystal_PCF8574 lcd(LCDI2C); 
 SPRINKLERSYSTEM sprinklersystem(ESP32LED);
 void startup();                         // Pre-declaration for simplicity
@@ -71,17 +72,29 @@ void clearLcdRow(int row) {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[logger]-----------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void logger(String message) {
+  char now[120];
+  strftime(now, sizeof(now), "%Y-%m-%d %H:%M:%S - ", &timeinfo);
+  String str(now);
+  message = now+message;
+  events.send(message.c_str(),"message",millis());
+ }  
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[getContentType]---------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 String getContentType(String filename) {
-  if (filename.endsWith(F(".htm"))) return F("text/html");
+  if (filename.endsWith(F(".htm")))       return F("text/html");
   else if (filename.endsWith(F(".html"))) return F("text/html");
-  else if (filename.endsWith(F(".css"))) return F("text/css");
-  else if (filename.endsWith(F(".js"))) return F("application/javascript");
+  else if (filename.endsWith(F(".css")))  return F("text/css");
+  else if (filename.endsWith(F(".js")))   return F("application/javascript");
   else if (filename.endsWith(F(".json"))) return F("application/json");
-  else if (filename.endsWith(F(".png"))) return F("image/png");
-  else if (filename.endsWith(F(".gif"))) return F("image/gif");
-  else if (filename.endsWith(F(".jpg"))) return F("image/jpeg");
+  else if (filename.endsWith(F(".png")))  return F("image/png");
+  else if (filename.endsWith(F(".gif")))  return F("image/gif");
+  else if (filename.endsWith(F(".jpg")))  return F("image/jpeg");
   else if (filename.endsWith(F(".jpeg"))) return F("image/jpeg");
   return F("text/plain");
 }
@@ -239,6 +252,21 @@ bool isAuth(AsyncWebServerRequest *request) {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[startZone]--------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+bool startZone(const char * zone) {
+  if (strcmp(sprinklersystem.isEnabled(),zone)==0){
+    return 0;   
+  }
+  String message = "Starting zone -> ";
+  message.concat(zone);
+  logger(message);
+  sprinklersystem.runZone(zone);
+  return 0;
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handleFileRead]---------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 bool handleFileRead(AsyncWebServerRequest *request, String path) {
@@ -252,8 +280,8 @@ bool handleFileRead(AsyncWebServerRequest *request, String path) {
   String pathWithGz = path + F(".gz");
   if(SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)){   // If the file exists, either as a compressed archive, or normal
     bool gzipped = false;
-    if(SPIFFS.exists(pathWithGz)) {                         // If there's a compressed version available
-      path += F(".gz");                                     // Use the compressed version
+    if(SPIFFS.exists(pathWithGz)) {                       // If there's a compressed version available
+      path += F(".gz");                                   // Use the compressed version
       gzipped = true;
     }
     AsyncWebServerResponse *response = request->beginResponse(SPIFFS, path, contentType);
@@ -412,7 +440,10 @@ void handleUpdateStatus(AsyncWebServerRequest *request) {
   String state;
   String info;
   String zname;
+  String valve;
   int i = sprinklersystem.timeToProgStart(&timeinfo);
+  const char * valvePos = sprinklersystem.valvePosition();
+  valve = valvePos;
   if(sprinklersystem.getProgram()==4){state="0";} //programme off
   else if(!sprinklersystem.isSchedForToday(&timeinfo)){state ="1";} //Idle, not today
   else if(sprinklersystem.isCanceled()){state ="2";} // Manual cancellation
@@ -430,7 +461,7 @@ void handleUpdateStatus(AsyncWebServerRequest *request) {
       info = zr;
     }//currently running
 
-  String S = "{\"state\":\""+state+"\",\"info\":\""+info+"\",\"zone\":\""+zname+"\"}";
+  String S = "{\"state\":\""+state+"\",\"info\":\""+info+"\",\"zone\":\""+zname+"\",\"valve\":\""+valve+"\"}";
   request->send(200, "text/html", S);
 }
 //-----------------------------------------------------------------------]
@@ -460,6 +491,36 @@ void handleGetconf(AsyncWebServerRequest *request) {
 void handleGetprogram(AsyncWebServerRequest *request) {
   String S = "{\"p\":\""+String(sprinklersystem.getProgram())+"\"}";
   request->send(200, "text/html", S);
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[handleGetZoneList]------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void handleGetZoneList(AsyncWebServerRequest *request) {
+  char nameList[12][20];
+  sprinklersystem.getZoneNames(nameList);
+  int lastOption = sprinklersystem.getZoneCount();
+  String s = "[";
+  for (int i = 0; i < lastOption; ++i) {
+    const char * desc = sprinklersystem.getDescription(nameList[i]);
+    s=s+"{\"name\":\""+desc+"\",\"val\":\""+nameList[i]+"\"},";        
+  } 
+  int lastIndex = s.length() - 1;
+  s.remove(lastIndex);
+  s+="]";
+  request->send(200, "text/html", s);
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[handleSendManual]------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void handleSendManual(AsyncWebServerRequest *request) {
+  const char * val = request->arg("zone").c_str();   
+  setManualFlag = true;
+  strncpy(selectedProgram,val,20);
+  request->send(200, "text/html", "{\"status\":\"ok\"}");
 }
 //-----------------------------------------------------------------------]
 
@@ -496,10 +557,12 @@ String sha1(String payloadStr){
 //////////////////////////////////////////////////////////////////////////
 void serverRouting() {
   server.on("/login",         HTTP_POST, handleLogin);
-  server.on("/logout",        HTTP_GET, handleLogout);
+  server.on("/logout",        HTTP_GET,  handleLogout);
   server.on("/updateConfig",  HTTP_POST, handleUpdateConfig);
   server.on("/getConf",       HTTP_POST, handleGetconf);
   server.on("/getProg",       HTTP_POST, handleGetprogram);
+  server.on("/getZoneList",   HTTP_GET,  handleGetZoneList);
+  server.on("/sendManual",    HTTP_POST, handleSendManual);
   server.on("/updateStatus",  HTTP_POST, handleUpdateStatus);
   server.onNotFound([](AsyncWebServerRequest *request) {  // If the client requests any URI
     if (!handleFileRead(request, request->url())){        // send it if it exists
@@ -718,17 +781,14 @@ void displayMeter() {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[startZone]--------------------------------------------------]
+//-FUNCTION-[closeZones]-------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
-bool startZone(const char * zone) {
-Serial.print("startZone() check for ");  Serial.println(zone);
-Serial.print("isenabled ");  Serial.println(sprinklersystem.isEnabled());
-  if (strcmp(sprinklersystem.isEnabled(),zone)==0){
-    return 0;   
-  }
-Serial.print("run runzone");
-  sprinklersystem.runZone(zone);
-  return 0;
+void closeZones() {
+  String message = "Closure of zones and valve requested";
+  logger(message);
+  sprinklersystem.setValve("CLOSED");
+  sprinklersystem.closeZone(sprinklersystem.isEnabled());
+  sprinklersystem.clearEnabled();
 }
 //-----------------------------------------------------------------------]
 
@@ -736,6 +796,7 @@ Serial.print("run runzone");
 //-FUNCTION-[checkMenu]--------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 bool checkMenu(){
+  String message;
   if ( (programMenu >=0) && (!inManualProgram) ){
     int lastOption = sprinklersystem.getZoneCount();
     if(programMenu == lastOption){
@@ -744,10 +805,7 @@ bool checkMenu(){
       selectlevel=-1;
     }
     //Send off program at selectedProgram
-Serial.print("SPX:   ");Serial.println(selectedProgram);
-
-
-
+//Serial.print("SPX:   ");Serial.println(selectedProgram);
 
   if (strcmp(selectedProgram,"BACK")==0){
     Serial.println("CLICKED BACK");
@@ -757,9 +815,8 @@ Serial.print("SPX:   ");Serial.println(selectedProgram);
     displayLock = false;
     lastTimepoll = -60000;
     menulevel =0;
-    selectlevel =0;
-    inManualProgram = true;
-    startZone(selectedProgram);
+    selectlevel =0;  
+    setManualFlag = true; // Will be grabbed by the mainPoll task
     return 1;
   }
   if (strcmp(menu[menulevel][selectlevel],"BACK")==0){
@@ -778,6 +835,8 @@ Serial.print("SPX:   ");Serial.println(selectedProgram);
     return 1;
   }
   if (strcmp(menu[menulevel][selectlevel],"CANCEL PROGRAMME")==0){
+    message = "Cancelling manual mode, resuming automatic schedule.";
+    logger(message);
     sprinklersystem.setCanceled(true);
     displayLock = false;
     inManualProgram = false;
@@ -785,6 +844,7 @@ Serial.print("SPX:   ");Serial.println(selectedProgram);
     lastTimepoll = -60000;
     menulevel = 0;
     selectlevel = 0;
+    closeZones();
     return 1;
   }
   if (strcmp(menu[menulevel][selectlevel],"START PROGRAMME")==0){
@@ -868,17 +928,6 @@ Serial.print(testprog);
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[closeZones]-------------------------------------------------]
-//////////////////////////////////////////////////////////////////////////
-void closeZones() {
-Serial.println("CLOSE ZONES");
-Serial.print(sprinklersystem.setValve("CLOSED"));
-  sprinklersystem.closeZone(sprinklersystem.isEnabled());
-  sprinklersystem.clearEnabled();
-}
-//-----------------------------------------------------------------------]
-
-//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handleManualsched]------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleManualsched(){
@@ -888,6 +937,24 @@ Serial.println(selectedProgram);
 //Set the Start time to now or the offset based on the zone start
   sprinklersystem.offsetManual(selectedProgram, &timeinfo);
 }
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-TASK-[mainPoll]-------------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void mainPoll(void * parameter){
+  for (;;){
+    if (setManualFlag){  //---HANDLES THE MANUAL PROGRAMME TURN UP PROCESS
+      inManualProgram = true;
+      setManualFlag = false;
+      String message = "Starting manual mode execution beginning from zone -> ";
+      message.concat(selectedProgram);
+      logger(message);
+      startZone(selectedProgram);
+    }//----------------------------------------
+delay(1000);
+  }
+}  
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
@@ -909,13 +976,6 @@ Serial.print("IMP bool value");Serial.println(inManualProgram);
             if (!displayLock){
               lcd.setCursor(0,3);
               lcd.print("        IDLE");
-
-
-//check close valve
-
-
-
-
             }
         }
       else if(sprinklersystem.isCanceled()){
@@ -1040,8 +1100,17 @@ void startup(){
   }
   server.on("/getWifiList",  HTTP_GET, handleWifiList);
   server.on("/connectwWifi", HTTP_POST, handleWifiConnect); 
-  server.on("/checkStatus",  HTTP_GET, handleCheckStatus); 
+  server.on("/checkStatus",  HTTP_GET, handleCheckStatus);
+  events.onConnect([](AsyncEventSourceClient *client){
+    if(client->lastId()){
+      Serial.printf("Client reconnected! Last message ID that it got is: %u\n", client->lastId());
+    }
+    // send event with message "hello!", id current millis
+    // and set reconnect delay to 1 second
+  //  client->send("hello!", NULL, millis(), 10000);
+  });
   serverRouting();
+  server.addHandler(&events);
   server.begin();
   delay(2000);
   if (SPIFFS.exists("/system.cnf")){
@@ -1054,8 +1123,10 @@ void startup(){
     else {
       lcd.print("PROCESS COMPLETE");
       delay(1000);
+      TaskHandle_t mainPollhandle = NULL;
       TaskHandle_t everyminutehandle = NULL;
       TaskHandle_t rotaryLoophandle  = NULL;
+      xTaskCreatePinnedToCore(mainPoll,"mainPolltask",2400,NULL,1,&mainPollhandle,1);
       xTaskCreatePinnedToCore(everyMinute,"everyminutetask",2400,NULL,1,&everyminutehandle,1);
       xTaskCreatePinnedToCore(rotaryLoop,"rotaryLooptask",1800,NULL,1,&rotaryLoophandle,1);
       sprinklersystem.info();
@@ -1113,7 +1184,6 @@ void setup() {
   Serial.begin(115200);
   TaskHandle_t facdefhandle = NULL;
   pinMode(FACDEFPIN, INPUT_PULLUP);
-//lcd.init();
   lcd.begin(LCDROWS, LCDCOLS);
   rotaryEncoder.setBoundaries(0,10,false);
   rotaryEncoder.begin();
