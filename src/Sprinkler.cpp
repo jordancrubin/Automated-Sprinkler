@@ -7,34 +7,47 @@
 */
 #include <Arduino.h>
 #include <Sprinkler.h>
+#include <SD.h>
+#include <FS.h>
+#include <Wire.h>
 
 //MAIN CONSTRUCTOR ------------------------------------------------------------]
 //SPRINKLERSYSTEM SPRINKLERSYSTEM(int statusled)
-SPRINKLERSYSTEM::SPRINKLERSYSTEM(int statusled){
-  this->LED=statusled;
+SPRINKLERSYSTEM::SPRINKLERSYSTEM(int pf575addr){
+  this->pf575address= pf575addr;
   this->active=false;
   this->consumption = 0;
   this->enabled = " ";
-  pinMode(LED,OUTPUT);
 }
 // ----------------------------------------------------------------------------]
 
 //ZONE CONSTRUCTOR ------------------------------------------------------------]
 SPRINKLERSYSTEM::Zone::Zone(int pin, const char* name){ 
   this->description = "unset";
-  this->gpio = pin;
+  this->port = pin;
   this->thisname = name;
-  pinMode(gpio,OUTPUT);
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [addMeter] - [Returns the current version from the Object--------]
-void SPRINKLERSYSTEM::addMeter(int gpioPin, bool usePullup, char measure, long debounceDelay, bool useSpiffs, double increment){
-  //WATERMETER WATERMETER(SignalGPIOpin,useInternalPullupResistor,measure[g|l],metervalue)
-  flowmeter = new WATERMETER(gpioPin,usePullup,measure,debounceDelay,useSpiffs,increment);
-  flowmeter->setMeter(32.2);
+// FUNCTION - [activateSolenoid] - [Opens a solenoid -1 to shut all -----------]
+void SPRINKLERSYSTEM::activateSolenoid(int solenoidNum){
+  if (solenoidNum == -1){
+    this->writePf575(0B1111111111111111); //Set all off
+    return;
+  }
+  int mask   = 0B0000000000000001;
+  int offVal = 0B1111111111111111;
+  mask = mask << solenoidNum-1;
+  int result = offVal ^ mask;
+Serial.println(result, BIN);
+  this->writePf575(result); 
+}
+// ----------------------------------------------------------------------------]
+
+// FUNCTION - [addMeter] - [Adds a water meter to the Object-------------------]
+void SPRINKLERSYSTEM::addMeter(int gpioPin, bool usePullup, char measure, long debounceDelay, bool useSDfs, double increment,int saveinterval, bool debug){
+  flowmeter = new WATERMETER(gpioPin,usePullup,measure,debounceDelay,useSDfs,increment,saveinterval,debug);
   this->measure = measure;
-  //Serial.println(flowmeter->initFilesys());
   flowmeter->initFilesys();
 }
 // ----------------------------------------------------------------------------]
@@ -42,6 +55,7 @@ void SPRINKLERSYSTEM::addMeter(int gpioPin, bool usePullup, char measure, long d
 // FUNCTION - [addRainSensor] - [updates rain sendor object attributes---------]
 void SPRINKLERSYSTEM::addRainSensor(int gpioPin){
   this->rainSensorGpio = gpioPin;
+  pinMode(this->rainSensorGpio, INPUT_PULLUP);
   this->hasRainsensor = true;
 }
 // ----------------------------------------------------------------------------]
@@ -53,10 +67,10 @@ void SPRINKLERSYSTEM::addValve(int relaygpio, int opengpio, int closedgpio, bool
 // ----------------------------------------------------------------------------]
 
 // FUNCTION - [addZone] - [Returns the current version from the Object---------]
-const char* SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
+const char* SPRINKLERSYSTEM::addZone(int gpio, char* zonename){  
   if (strlen(zonename) > 20){
     return "20Charnamelimit";
-  }  
+  } 
   for(int i=0; i< maxZones; i++){
      if (storedZones[i]){continue;}
      else {
@@ -67,9 +81,9 @@ const char* SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
       myIndex = this->getIndex(gpio);
       if (myIndex >=0 && myIndex <=maxZones+1) {
           return "gpioinuse";
-      }
-      storedZones[i] = new Zone(gpio,zonename);
-      digitalWrite(storedZones[i]->gpio,HIGH);
+      }    
+     storedZones[i] = new Zone(gpio,zonename);     
+//      digitalWrite(storedZones[i]->gpio,HIGH); //old code
       zoneCount++;
       break;
     }
@@ -77,6 +91,13 @@ const char* SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
   return 0;
 }
 // ----------------------------------------------------------------------------]
+
+// FUNCTION - [begin] - [clears the enabled flagfrom the Object----------------]
+void SPRINKLERSYSTEM::begin(int ic2port){
+  Wire.begin();
+  this->writePf575(0B1111111111111111); //Set all off
+}
+// ----------------------------------------------------------------------------] 
 
 // FUNCTION - [clearEnabled] - [clears the enabled flagfrom the Object---------]
 void SPRINKLERSYSTEM::clearEnabled(){
@@ -89,7 +110,8 @@ void SPRINKLERSYSTEM::clearEnabled(){
 void SPRINKLERSYSTEM::closeZone(const char* name){
   int myIndex = this->getIndex(name);
   if (myIndex >=0 && myIndex <=maxZones+1) {
-    digitalWrite(storedZones[myIndex]->gpio,HIGH);
+  //  digitalWrite(storedZones[myIndex]->gpio,HIGH); //old code
+  this->activateSolenoid(-1);
     storedZones[myIndex]->open = false;
   }
 }
@@ -118,11 +140,11 @@ int SPRINKLERSYSTEM::getIndex(const char* name){
 // ----------------------------------------------------------------------------]
 
 // PRIVATE - [getIndex] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx---------]
-int SPRINKLERSYSTEM::getIndex(int gpio){
+int SPRINKLERSYSTEM::getIndex(int port){
   int returnIndex = -1;
   for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
     if(storedZones[i]){
-      if (storedZones[i]->gpio == gpio){ 
+      if (storedZones[i]->port == port){ 
         returnIndex = i;
         return returnIndex;
       }
@@ -136,27 +158,41 @@ int SPRINKLERSYSTEM::getIndex(int gpio){
 char SPRINKLERSYSTEM::getMeasureType(){
   return this->measure;
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
 // FUNCTION - [getProgram] - [Returns the current program from the Object------]
 int SPRINKLERSYSTEM::getProgram(){
   return this->program;
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [getRainSensor] - [Returns OP state of rain sensor ---------------]
+bool SPRINKLERSYSTEM::getRainSensor(){
+  return this->rainsensorStatus; 
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [getHasRainSensor] - [Returns existance rain sensor --------------]
+bool SPRINKLERSYSTEM::getHasRainSensor(){
+  return this->hasRainsensor; 
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [readRainSensor] - [Returns the rain sensor state ----------------] CONDENSE THIS!!!!!!
+bool SPRINKLERSYSTEM::readRainSensor(){
+  bool state = digitalRead(this->rainSensorGpio);
+  return state; 
+}
+// ----------------------------------------------------------------------------]
 
 // FUNCTION - [getSchedZone] - [Returns zone that should be running right now---]
 const char * SPRINKLERSYSTEM::getSchedZone(int elapsed){
-Serial.print("ELAPS: ");Serial.println(elapsed);
   for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
     if(storedZones[i]){
-Serial.print(storedZones[i]->thisname); Serial.print(storedZones[i]->duration); Serial.println(storedZones[i]->gpio); 
       int zoneremain = elapsed + storedZones[i]->duration;
- Serial.print("ZR: ");  Serial.println(zoneremain);
       this->zoneRemaining = zoneremain;
-      if (zoneremain > 0){ return storedZones[i]->thisname;}
+      if (zoneremain > 0){return storedZones[i]->thisname;}
       else {elapsed = elapsed + storedZones[i]->duration;}
-Serial.println("---------------");
-Serial.print("next with ");Serial.println(elapsed);
     }
   }
   return "-1";
@@ -203,8 +239,24 @@ const char * SPRINKLERSYSTEM::isEnabled(){
 }
 // ----------------------------------------------------------------------------]
 
+// FUNCTION - [removeZone] - [Returns the state of inManual--------------------]
+bool SPRINKLERSYSTEM::isInManualProgram(){
+  return this->inManual;
+}
+// ----------------------------------------------------------------------------]
+
+// FUNCTION - [removeZone] - [Returns the state of inManual--------------------]
+void SPRINKLERSYSTEM::isInManualProgram(bool val){
+  if (val == true){
+    backupStartTime = startTime;
+  }
+  this->inManual = val;
+}
+// ----------------------------------------------------------------------------]
+
 // FUNCTION - [isSchedForToday] - [Returns if set to run today------------------]
 bool SPRINKLERSYSTEM::isSchedForToday(tm * day){
+  if (inManual){return 1;}
   int today = day->tm_wday;
   if (today==0){today=6;}
   else {today--;}
@@ -214,7 +266,7 @@ bool SPRINKLERSYSTEM::isSchedForToday(tm * day){
 
 // FUNCTION - [isTodayComplete] - [Returns if todays prog has completed or not--]
 bool SPRINKLERSYSTEM::isTodayComplete(tm * time){
-  int i = this->timeToProgStart(time);
+  int i = this->timeToProgStart(time); 
   const char *  zoneName = this->getSchedZone(i);
   if(strcmp(zoneName,"-1")==0){
     return 1;
@@ -233,26 +285,21 @@ bool SPRINKLERSYSTEM::meterMoved(void){
 
 // FUNCTION - [offsetManual] - [Returns the current version from the Object--------]
 void SPRINKLERSYSTEM::offsetManual(const char* name, tm * time){
-Serial.println("SPR::offsetManual");
-  if (!inManual){
-Serial.println("Engaging Manual Mode ");
-    inManual = true;
-    backupStartTime = startTime;
+  //if (!inManual || manualZoneChange){
+    if (manualZoneChange){
+    if (!inManual){
+      backupStartTime = startTime;
+    }
+   // inManual = true;
+    manualZoneChange = false;
     startTime = time->tm_hour * 100 + time->tm_min;
     int myIndex = this->getIndex(name);
     int offset =0;
     for(int i=myIndex; i> 0; i--){
-        Serial.print(i);
-        Serial.print(" -> ");
-        Serial.println(storedZones[i]->duration);
         offset = offset + storedZones[i]->duration;
     }
-    Serial.println(startTime);
-    Serial.print(offset);
     startTime = startTime - offset;
   }
-else{Serial.println("already in Manual Mode");}
-
 } 
 // ---------------------------------------------------------------------------]
 
@@ -260,15 +307,16 @@ else{Serial.println("already in Manual Mode");}
 void SPRINKLERSYSTEM::cancelManual(){
   inManual = false;
   startTime = backupStartTime;
-  Serial.println("Switch to Automatic mode");
 }
+// ---------------------------------------------------------------------------]
 
 // FUNCTION - [openZone] - [Returns the current version from the Object--------]
 void SPRINKLERSYSTEM::openZone(const char* name){
   int myIndex = this->getIndex(name);
   if (myIndex >=0 && myIndex <=maxZones+1) {
     this->setConsumption();
-    digitalWrite(storedZones[myIndex]->gpio,LOW);
+    this->activateSolenoid(storedZones[myIndex]->port);
+   // digitalWrite(storedZones[myIndex]->gpio,LOW); //old code
     storedZones[myIndex]->open = true;
   }  
 }
@@ -306,33 +354,31 @@ void SPRINKLERSYSTEM::removeZone(const char* name){
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [readmeter] - [Returns the current version from the Object--------]
+// FUNCTION - [readmeter] - [Returns the current version from the Object-------]
 bool SPRINKLERSYSTEM::runZone(const char * zoneName){
-Serial.print("VP: ");Serial.println(this->valvePosition());
   if (strcmp(this->valvePosition(),"OPEN")!=0){
     const char * result = this->setValve("OPEN");
-    Serial.print("RE: ");Serial.println(result);
   }
   this->closeZone(this->isEnabled());
-//store the consumption int he individunal zome
+  //store the consumption in the individual zone
   this->openZone(zoneName);
   this->enabled = zoneName;
   this->active = true;
   return 0;
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
-// FUNCTION - [setCanceled] - [Sets the Canceled State of the system------------]
+// FUNCTION - [setCanceled] - [Sets the Canceled State of the system-----------]
 void SPRINKLERSYSTEM::setCanceled(bool val){
   this->canceled = val;
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
 // FUNCTION - [setconsumption] - [Returns the current version from the Object-]
 void SPRINKLERSYSTEM::setConsumption(void){
   this->consumption = this->readMeter();
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
 // FUNCTION - [setDescription] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx---------]
 void SPRINKLERSYSTEM::setDescription(const char* name, const char* description){
@@ -346,6 +392,18 @@ void SPRINKLERSYSTEM::setDescription(const char* name, const char* description){
 }
 // ----------------------------------------------------------------------------]
 
+// FUNCTION - [setManualZoneChange] - [set manualzonechange flag---------------]
+void SPRINKLERSYSTEM::setManualZoneChange(bool val){
+  manualZoneChange = val;
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [setMeter] - [set meter value------------------------------------]
+void SPRINKLERSYSTEM::setMeter(double val){
+  flowmeter->setMeter(val); 
+}
+// ----------------------------------------------------------------------------] 
+
 // FUNCTION - [setProgram] - [sets the current program A-C equates to 1-3 4 OFF]
 void SPRINKLERSYSTEM::setProgram(int programNum){
   const char * prog = "programa";
@@ -353,17 +411,17 @@ void SPRINKLERSYSTEM::setProgram(int programNum){
   if (programNum ==2){prog = "programb";j=4;}
   if (programNum ==3){prog = "programc";j=5;}
   if (programNum ==4){this->program =programNum; return;}
-  File file = SPIFFS.open("/programmes.cnf");
-  if (file){
+  File progfile = SD.open("/config/programmes.cnf");
+  if (progfile){
     DynamicJsonDocument doc(1024);
-    deserializeJson(doc, file); 
+    deserializeJson(doc, progfile); 
     this->startTime = atoi(doc[prog][0]);
     for(int counter = 0;counter <= 6;counter++) {
       this->days[counter] = doc[prog][counter+1];
     }
-    file.close();
+    progfile.close();
   }
-  file = SPIFFS.open("/system.cnf");
+  File file = SD.open("/config/system.cnf");
   if (file){
     DynamicJsonDocument doc(1024);
     deserializeJson(doc, file); 
@@ -380,8 +438,14 @@ void SPRINKLERSYSTEM::setProgram(int programNum){
 }
 // ----------------------------------------------------------------------------]
 
+// FUNCTION - [setRainsensorStatus] - [Sets rain sensor status of the Object---]
+void SPRINKLERSYSTEM::setRainsensorStatus(bool value){ 
+ this->rainsensorStatus = value;
+}
+// ----------------------------------------------------------------------------]
+
 // FUNCTION - [setValve] - [Returns the current version from the Object--------]
-const char* SPRINKLERSYSTEM::setValve(const char* value){
+const char* SPRINKLERSYSTEM::setValve(const char* value){ 
  const char* result = thisvalve->setValvePosition(value);
  return result;
 }
@@ -394,31 +458,40 @@ bool SPRINKLERSYSTEM::startSpiffFs(){
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [statusLedBlink] - [Controls the Status LED----------------------]
-void SPRINKLERSYSTEM::statusLedBlink(int count, int speed){
-  if ((count ==1)&&(speed==0)){digitalWrite(LED,HIGH); return;}
-  if ((count ==0)&&(speed==0)){digitalWrite(LED,LOW);  return;}
-  for (int i = 0; i < count; ++i) {
-    delay(speed);
-    digitalWrite(LED,HIGH);
-    delay(speed);
-    digitalWrite(LED,LOW);
-  }
+// FUNCTION - [startSDfs] - [Starts file system services-----------------------]
+ bool SPRINKLERSYSTEM::startSDfs(){
+  if(!SD.begin()){return 0;}
+    File root = SD.open("/meter");
+    if(!root.isDirectory()){
+      SD.mkdir("/meter");
+    }  
+    root.close();
+    root = SD.open("/config");
+    if(!root.isDirectory()){
+      SD.mkdir("/config");
+    }  
+    root.close();
+    return 1;
 }
 // ----------------------------------------------------------------------------]
 
 // FUNCTION - [timeToProgStart()] - [Returns the min until prog begins---------]
 int SPRINKLERSYSTEM::timeToProgStart(tm * sttime){
-//Serial.print("ST:  ");Serial.println(this->startTime);
-//Serial.print("STHRS:  ");Serial.println(this->startTime/100);
-//Serial.print("TO HRS:  ");Serial.println(sttime->tm_hour);
-//Serial.print("TOT: ");Serial.println(sttime->tm_hour * 100 + sttime->tm_min);
   int res = this->startTime - (sttime->tm_hour * 100 + sttime->tm_min);
-//Serial.print("RES: ");Serial.println(res);
   if ( ((this->startTime/100)-(sttime->tm_hour)) >0 ) {res=res-40;}
-  return res;
+  int b,c;
+  b =(res/100)*60;
+  c =(res%100);
+  return b+c;
 }
 // ----------------------------------------------------------------------------]
+
+// FUNCTION - [updateMeter] - [writes meter value to SD card-------------------]
+void SPRINKLERSYSTEM::updateMeter(){
+  double val = flowmeter->readOut();
+  flowmeter->setMeter(val);
+}
+// ----------------------------------------------------------------------------] 
 
 // FUNCTION - [valveLastDuration] - [Returns the position of the valve---------]
 int SPRINKLERSYSTEM::valveLastDuration(char* event){
@@ -444,50 +517,11 @@ const char* SPRINKLERSYSTEM::valvePosition(void){
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [zoneInfo] - [Returns the current version from the Object--------]
-void SPRINKLERSYSTEM::zoneInfo(){
-  char buf[200];
-  //Serial.println("\n\n***ZONE INFO***");
-  sprintf(buf,"%-8s %-8s %-18s %-18s\n","INDEX","GPIO","NAME","DESCRIPTION");
-  Serial.print(buf);
-  for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
-    buf[0] = '\0';
-    char iindex[3]; 
-    char igpio[3];
-    if(storedZones[i]){
-     itoa(i,iindex,10);
-     itoa(storedZones[i]->gpio,igpio,10);
-     sprintf(buf,"%-8s %-8s %-18s %-18s\n",iindex,igpio,storedZones[i]->thisname,storedZones[i]->description);
-     Serial.print(buf);
-    }
-  }
-}
-// ----------------------------------------------------------------------------]
-
-// FUNCTION - [zoneInfo] - [Returns the current version from the Object--------]
-void SPRINKLERSYSTEM::zoneInfo(const char* name){
-  int myIndex = this->getIndex(name);
-  if (myIndex >=0 && myIndex <=maxZones+1) {
-    //Serial.print("\n\n***Zone info for "); Serial.print(name);Serial.println("***");
-Serial.println(storedZones[myIndex]->thisname);
-    char buf[200];
-    char igpio[3];
-    const char *enabled = "FALSE";
-   // if (storedZones[myIndex]->enabled ==1){enabled = "TRUE";}
-    itoa(storedZones[myIndex]->gpio,igpio,10);
-    sprintf(buf,"%-11s %-11s\n%-11s %-11s\n%-11s %-11s\n%-11s %-11s\n","GPIO",igpio,"ENABLED",enabled,"STATE","VALUE","DESCIPTION",storedZones[myIndex]->description);
-    Serial.print(buf);
-  }
-  else {
-    Serial.println("Invalid Zone name");
-  }
-}
-// ----------------------------------------------------------------------------]
-
-// FUNCTION - [zoneInfo] - [Returns the current version from the Object--------]
-void SPRINKLERSYSTEM::info(){
-   // Serial.println("\n\n***Information\n");
-   // Serial.print("PROGRAM   -> "); Serial.println(this->program);
-   // Serial.print("RAIN SENS -> "); Serial.println(this->hasRainsensor);
+// FUNCTION - [writePf575] - [Writes to PF575 GPIO Expander--------------------]
+void SPRINKLERSYSTEM::writePf575(uint16_t data){
+  Wire.beginTransmission(this->pf575address);
+  Wire.write(lowByte(data));
+  Wire.write(highByte(data));
+  Wire.endTransmission();
 }
 // ----------------------------------------------------------------------------]

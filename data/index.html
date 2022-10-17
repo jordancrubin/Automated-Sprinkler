@@ -20,18 +20,6 @@
             <!-- Navbar Search -->
             <form class="d-none d-md-inline-block form-inline ms-auto me-0 me-md-3 my-2 my-md-0">
             </form>
-            <!-- Navbar-->
-            <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fas fa-user fa-fw"></i></a>
-                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                        <li><a class="dropdown-item" href="/configure.html">Settings</a></li>
-                        <li><a class="dropdown-item" href="/programme.html">Programme</a></li>
-                        <li><hr class="dropdown-divider" /></li>
-                        <li><a class="dropdown-item" href="#!" onclick="LogoutDialogue()">Logout</a></li>
-                    </ul>
-                </li>
-            </ul>
         </nav>
         <div id="layoutSidenav">
             <div id="layoutSidenav_nav">
@@ -50,6 +38,7 @@
                                 <option value="2">Programme B</option>
                                 <option value="3">Programme C</option>
                             </select>
+                            <span id="rainsenseselector"></span>
                         </ol>
                         <div class="row">
                             <div class="col-xl-12 col-md-6">
@@ -58,6 +47,8 @@
                                       <h5 class="card-title"><div id="state"></div></h5>
                                       <p class="card-text"><div id="stateInfo"></div></p>
                                       <p class="card-text"><div id="valveState"></div></p>
+                                      <p class="card-text"><div id="rainState"></div></p>
+                                      <p class="card-text"> <div id="cancelbutton"><input class="btn btn-success" type="button" value="Cancel" onclick="cancelRun()"></div></p>
                                     </div>
                                   </div>
                             </div>
@@ -92,9 +83,6 @@
                                     <textarea class="form-control z-depth-1" style="overflow:auto;" id="eventLog" rows="19"></textarea>
                                 </div>
                             </div>
-
-
-
 
                         </div>
                         <div class="card mb-4">
@@ -271,7 +259,7 @@
                 <footer class="py-4 bg-light mt-auto">
                     <div class="container-fluid px-4">
                         <div class="d-flex align-items-center justify-content-between small">
-                            <div class="text-muted">Copyright &copy; Jordan Rubin 2021</div>
+                            <div class="text-muted">Copyright &copy; Jordan Rubin 2022</div>
                             <div>
                                 <a href="#">Privacy Policy</a>
                                 &middot;
@@ -293,106 +281,15 @@
 
 
     <script>
-        msgArray = [];
         addSidebar();
-        getCurrentProg();
+        addRainsenseDropdown();
+        getCurrentProg();   
         updateStatus();
         updateZoneList();
         var element = document.getElementById("manualrunbutton");
+        var celement = document.getElementById("cancelbutton");
         element.style.display = "none";
+        celement.style.display = "none";
         var statusInterval = setInterval(updateStatus, 5000);
-        if (!!window.EventSource) {
-            var source = new EventSource('/events');
-            source.addEventListener('open', function(e) {
-  console.log("Events Connected");
- }, false);
- source.addEventListener('error', function(e) {
-  if (e.target.readyState != EventSource.OPEN) {
-    console.log("Events Disconnected");
-  }
- }, false);
- 
- source.addEventListener('message', function(e) {
- //   var testnum = Math.floor(Math.random() * 10);
-  //  var test = testnum+"-"+e.data;
-   // msgArray.unshift(test);
-    msgArray.unshift(e.data);
-    if (msgArray.length == 20){
-        msgArray.pop();
-    }
-    console.log(msgArray);
-    var textarea = document.getElementById("eventLog");
-    textarea.value = msgArray.join("\n");
-    console.log("message", e.data);
- }, false);
- 
-
- source.addEventListener('temperature', function(e) {
-  console.log("temperature", e.data);
-  document.getElementById("temp").innerHTML = e.data;
- }, false);
-}
-
-
-
-////////
-        function LogoutDialogue() {
-          var txt;
-          if (confirm("Are you sure you want to logout?")) {
-            const Http = new XMLHttpRequest();
-            const url='/logout';
-            Http.open("GET", url);
-            Http.send();
-            Http.onreadystatechange = (e) => {
-                window.location.href = "login.html";
-            }           
-          } 
-          else { }
-        }
-///////////
-        function activeProgChange(){
-        var sel = document.getElementById("activeprog");
-        var opt = sel.options[sel.selectedIndex];
-        progval = opt.value; 
-            console.log('PROG CHANGE');
-            var xhr = new XMLHttpRequest();
-            xhr.onreadystatechange = function() {
-            if (this.readyState == 4 && this.status == 200) {
-                var data = JSON.parse(this.responseText);
-                if (data.s == "0"){
-                  
-                }
-                else {
-                  alert("Update error, try again...");
-                }
-            }
-        };  
-      xhr.open("POST", "updateConfig", true);
-      xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-      xhr.send("event=progchange&value="+progval); 
-        }
-
-////////////////
-        function getCurrentProg(){
-            var xhr = new XMLHttpRequest();
-            xhr.onreadystatechange = function() {
-            if (this.readyState == 4 && this.status == 200) {
-                var data = JSON.parse(this.responseText);
-                if (data.p){                 
-                    var prog = document.getElementById('activeprog');
-                    console.log("current program: "+data.p);
-                    for (var opt, j = 0; opt = prog[j]; j++) {
-                        if (data.p ==  prog[j].value){
-                            prog.options.selectedIndex = j;
-                            console.log(prog[j].value);
-                        }
-                    }  
-                }
-            }
-        };  
-            xhr.open("POST", "getProg", true);
-            xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-            xhr.send(); 
-        }
         </script>
 </html>

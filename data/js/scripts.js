@@ -5,282 +5,481 @@
     */
     // 
 // Scripts
-
-function tzPopulate(){
-    var selectElem = document.getElementById("timezone");
-    for (var i = 0; i < TZdata.length; i++){
-        var name = TZdata[i].FIELD1;
-        var value = TZdata[i].FIELD2;
-        var element = document.createElement("option");
-        element.innerText = name;
-        element.value = value;
-        selectElem.append(element);
-    }    
-}
-
-function getCookie(cname) {
-    var name = cname + "=";
-    var decodedCookie = decodeURIComponent(document.cookie);
-    var ca = decodedCookie.split(';');
-    for(var i = 0; i <ca.length; i++) {
-      var c = ca[i];
-      while (c.charAt(0) == ' ') {
-        c = c.substring(1);
-      }
-      if (c.indexOf(name) == 0) {
-        return c.substring(name.length, c.length);
-      }
-    }
-    return "";
-  }
-
-/// updateZonelist()  For the manual run pf programmes  
-function updateZoneList() {
-var dropdown = document.getElementById('manualrunlist');     
-  var option;
-  dropdown.length = 0;
-  defaultOption = document.createElement('option');
-  defaultOption.text = "Refreshing Configured Zones";
-  dropdown.add(defaultOption);
+var rsexist;
+var meterzoneval;
+function activeProgChange(){
+  var sel = document.getElementById("activeprog");
+  var opt = sel.options[sel.selectedIndex];
+  progval = opt.value; 
   var xhr = new XMLHttpRequest();
   xhr.onreadystatechange = function() {
     if (this.readyState == 4 && this.status == 200) {
       var data = JSON.parse(this.responseText);
-console.log(data);
-      dropdown.length = 0;
-      defaultOption = document.createElement('option');
-      defaultOption.text = 'Choose a zone.....';
-      defaultOption.value = '';
-      dropdown.add(defaultOption);
-      dropdown.selectedIndex = 0;
-console.log(data.length)   
-      for (let i = 0; i < data.length; i++) {
-        option = document.createElement('option');      
-        option.text = data[i].val+" - "+data[i].name;
-        option.value = data[i].val;
-        dropdown.add(option);
+      if (data.s == "0"){           
+      }
+      else {
+        alert("Error. Not yet configured....");
+        for(var i = 0; i < sel.length; i++) {
+          sel[i].selectedIndex =0;
+        } 
       }
     }
   };  
-  xhr.open("GET", "getZoneList", true);
-  xhr.send();
+  xhr.open("POST", "updateConfig", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send("event=progchange&value="+progval); 
 }
 
-function updateStatus(){
-    var state = document.getElementById("state");
-    var stateinfo = document.getElementById("stateInfo");
-        console.log('update Status....');
-        var xhr = new XMLHttpRequest();
-        xhr.onreadystatechange = function() {
-        if (this.readyState == 4 && this.status == 200) {
-          var data = JSON.parse(this.responseText);
-          console.log(data);
-          if (data.valve == 'CLOSED'){
-            valveState.innerHTML="Valve is <font color='green'>Closed</font>";
-          }
-          else if(data.valve == 'OPEN'){
-            valveState.innerHTML="Valve is <font color='red'>Open</font>";
-          }
-          else if(data.valve == 'MIDWAY'){
-            valveState.innerHTML="Valve is <font color='orange'>Midway</font>";
-          }
-          else{
-            valveState.innerHTML="Valve Status <font color='blue'>Unknown</font>";
-          } 
-            if (data.state == "0"){
-              state.innerHTML="Programme is disabled.....";
-              stateinfo.innerHTML= "";
-            }
-            else if(data.state == "1"){
-              state.innerHTML="Sprinkler is Idle Today.....";
-              stateinfo.innerHTML= "";
-            }
-            else if(data.state == "2"){
-              state.innerHTML="Manual Cancellation Requested.....";
-              stateinfo.innerHTML= "";
-            }
-            else if(data.state == "3"){
-              state.innerHTML="Programme begins in.....";
-              if (data.info > 60){
-                var hours = Math.floor(data.info / 60);
-                var minutes = data.info%60;
-                stateinfo.innerHTML= hours+" hours "+minutes+" minutes";
-              }
-              else {
-                stateinfo.innerHTML= data.info+" minutes";
-              }
-            }
-            else if(data.state == "4"){
-              state.innerHTML="Todays schedule has completed.....";
-              stateinfo.innerHTML= "";
-            }
-            else if(data.state == "5"){
-              var minutes = data.info;
-              var zone = data.zone;
-              if (minutes >1){
-                state.innerHTML="Zone "+zone+" - "+minutes+" minutes remain";
-              }
-              else {
-                state.innerHTML="Zone "+zone+" - "+minutes+" minute remains";
-              }
-                stateinfo.innerHTML= "Consumption 0.00g/min";
-              //line948 // line 420
-            }
-              else {
-              alert("Update error, try again...");
-            }
-        }
-    };  
+function addRainsenseDropdown() {   
+  var val = document.getElementById("rainsenseselector");
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+      if (data.rsexist == 1){
+        rsexist = data.rsexist;
+        val.innerHTML = '&nbsp;&nbsp;Rain Sensor&nbsp; <select class="selectpicker" id="rainsenssel" onchange="rainSenseChange()"><option value="0">Disabled</option>'+
+                        '<option value="1">Enabled</option></select>';
+        getCurrentRainSense();
+      }
+      else {
+        val.innerHTML = '&nbsp;&nbsp;Rain Sensor [Not Installed]';
+      }
+    } 
+  };  
   xhr.open("POST", "updateStatus", true);
   xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
   xhr.send(); 
 }
 
-function cookieChk(){
-    var testsession = getCookie("SESSIONID");
-    if (testsession == 0){
-        console.log("redirect it");
+function cancelRun() {
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
     }
+  };  
+  xhr.open("POST", "cancelRun", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send(); 
+}
+
+function cookieChk(){
+  var testsession = getCookie("SESSIONID");
+  if (testsession == 0){
+  }
+}
+
+function getCookie(cname) {
+  var name = cname + "=";
+  var decodedCookie = decodeURIComponent(document.cookie);
+  var ca = decodedCookie.split(';');
+  for(var i = 0; i <ca.length; i++) {
+    var c = ca[i];
+    while (c.charAt(0) == ' ') {
+      c = c.substring(1);
+    }
+    if (c.indexOf(name) == 0) {
+      return c.substring(name.length, c.length);
+    }
+  }
+  return "";
+}
+
+function getCurrentProg(){
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+      if (data.p){                 
+        var prog = document.getElementById('activeprog');
+        for (var opt, j = 0; opt = prog[j]; j++) {
+          if (data.p ==  prog[j].value){
+            prog.options.selectedIndex = j;
+          }
+        }  
+      }
+    }
+  };  
+  xhr.open("POST", "getProg", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send(); 
+}
+
+function readMeter(){ 
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);      
+      if (data.p){                 
+        var meter = document.getElementById('CurrentMeterReading');
+        meter.value = data.p;
+      }
+    }
+  };  
+  xhr.open("POST", "readMeter", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send(); 
+}
+
+function getCurrentRainSense(){
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+      if (data.p){                 
+        var prog = document.getElementById('rainsenssel');
+        for (var opt, j = 0; opt = prog[j]; j++) {
+          if (data.p ==  prog[j].value){
+            prog.options.selectedIndex = j;
+          }
+        }  
+      }
+    }
+  };  
+  xhr.open("POST", "getRainsense", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send(); 
 }
 
 function getURLParameter(sParam){
-    var sPageURL = window.location.search.substring(1);
-    var sURLVariables = sPageURL.split('&');
-    for (var i = 0; i < sURLVariables.length; i++){
-        var sParameterName = sURLVariables[i].split('=');
-        if (sParameterName[0] == sParam){
-            return sParameterName[1];
-        }
+  var sPageURL = window.location.search.substring(1);
+  var sURLVariables = sPageURL.split('&');
+  for (var i = 0; i < sURLVariables.length; i++){
+    var sParameterName = sURLVariables[i].split('=');
+    if (sParameterName[0] == sParam){
+      return sParameterName[1];
     }
+  }
+}
+
+function LogoutDialogue() {
+  if (confirm("Are you sure you want to logout?")) {
+    const Http = new XMLHttpRequest();
+    const url='/logout';
+    Http.open("GET", url);
+    Http.send();
+    Http.onreadystatechange = (e) => {
+      window.location.href = "login.html";
+    }           
+  } 
+  else { }
 }
 
 function manualRunListChange() {
   var dropdown = document.getElementById('manualrunlist');
   var value = dropdown.options[dropdown.selectedIndex].value;
   var element = document.getElementById("manualrunbutton");
- if (value == ''){
+  if (value == ''){
     element.style.display = "none";
- }
+  }
   else{
     element.style.display = "block";
   }
 }
 
+function printProgrammes(){
+  var content ='';
+  for (let i = 0; i < 3; i++) {
+    var letter = 'A';
+    if(i==1){letter='B';}
+    if(i==2){letter='C';}
+    var subContent = 
+    '<div class="row">'+
+    '<div class="col-xs-4 col-md-6">'+
+    '  <div class="alert alert-info" id="pwinfo">'+
+    '    PROGRAMME ['+letter+']'+
+    '  </div>'+
+    '</div>'+
+  '</div>'+                         
+  '<div class="row">'+
+  '<div class="col-xs-4 col-md-3">'+
+      '<div class="form-group">'+
+       '<!-- <form>-->'+
+       '<div class="form-group">'+
+       '<label for="starttime'+letter+'">Start Time 0000-2359'+
+       '<input type="text" class="form-control" id="st'+letter+'" name="st'+letter+'" placeholder="1800">'+
+         '</label>'+
+       '<label class="radio-inline">'+   
+         '<div class="weekDays-selector">'+
+           '&nbsp;<input type="checkbox" id="'+letter+'-1" class="weekday" /> '+
+           '<label for="weekday-mon">M</label> '+
+           '<input type="checkbox" id="'+letter+'-2" class="weekday" /> '+
+           '<label for="weekday-tue">T</label> '+
+           '<input type="checkbox" id="'+letter+'-3" class="weekday" /> '+
+           '<label for="weekday-wed">W</label> '+
+           '<input type="checkbox" id="'+letter+'-4" class="weekday" /> '+
+           '<label for="weekday-thu">T</label> '+
+           '<input type="checkbox" id="'+letter+'-5" class="weekday" /> '+
+           '<label for="weekday-fri">F</label> '+
+           '<input type="checkbox" id="'+letter+'-6" class="weekday" /> '+
+           '<label for="weekday-sat">S</label> '+
+           '<input type="checkbox" id="'+letter+'-7" class="weekday" /> '+
+           '<label for="weekday-sun">S</label> '+
+         '</div>'+  
+       '</label>'+
+   '</div>'+
+   '</div>'+
+   '</div>'+
+'</div>'+
+'</div>'+
+'</br></br>'+
+'<div class="row">'+
+'<div class="col-xs-4 col-md-6">'+
+'<div class="alert alert-info">'+
+' Zone Usage'+
+'</div>'+
+'</div>'+
+'</div>'+
+'<div class="row">'+
+'<div class="col-xs-4 col-md-6">'+
+   '<div class="form-group">'+
+     '<form>'+
+       '<div class="form-group">'+
+           '<table id="myTable" class=" table order-list'+letter+'">'+
+               '<thead>'+
+                   '<tr>'+
+                       '<td>Name</td>'+
+                       '<td>Duration</td>'+
+                   '</tr>'+
+               '</thead>'+
+               '<tbody>'+
+               '</tbody>'+
+               '<tfoot>'+
+                   '<tr>'+
+                       '<td>'+    
+                           '</br>'+
+                       '</td>'+
+                   '</tr>'+
+                   '<tr>'+
+                   '</tr>'+
+               '</tfoot>'+
+           '</table>'+
+       '</div>'+
+    '</div>'+  
+'</div>';
+  content = content+subContent;
+  }  
+  document.getElementById("programmeListing").innerHTML = content;
+}
+
+function rainSenseChange(){
+  var sel = document.getElementById("rainsenssel");
+  var opt = sel.options[sel.selectedIndex];
+  rainsenseval = opt.value; 
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+      if (data.s == "0"){  }
+      else {
+        alert("Update error, try again...");
+      }
+    }
+  };  
+  xhr.open("POST", "updateConfig", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send("event=rainsensechange&value="+rainsenseval); 
+}
 
 function submitManualRun() {
   var dropdown = document.getElementById('manualrunlist');
   var value = dropdown.options[dropdown.selectedIndex].value;
   var xhr = new XMLHttpRequest();
   xhr.onreadystatechange = function() {
-  if (this.readyState == 4 && this.status == 200) {
+    if (this.readyState == 4 && this.status == 200) {
       var data = JSON.parse(this.responseText);
-      console.log(data);
-  }
-};  
-xhr.open("POST", "sendManual", true);
-xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-xhr.send("zone="+value); 
+    }
+  };  
+  xhr.open("POST", "sendManual", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send("zone="+value); 
 }
 
-function LogoutDialogue() {
-    if (confirm("Are you sure you want to logout?")) {
-      const Http = new XMLHttpRequest();
-      const url='/logout';
-      Http.open("GET", url);
-      Http.send();
-      Http.onreadystatechange = (e) => {
-          window.location.href = "login.html";
-      }           
-    } 
-    else { }
+function submitMeter() {
+  var value = document.getElementById('newMeterReading').value;
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+    }
+  };  
+  xhr.open("POST", "sendNewMeter", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send("value="+value); 
+}
+
+function tzPopulate(){
+  var selectElem = document.getElementById("timezone");
+  for (var i = 0; i < TZdata.length; i++){
+    var name = TZdata[i].FIELD1;
+    var value = TZdata[i].FIELD2;
+    var element = document.createElement("option");
+    element.innerText = name;
+    element.value = value;
+    selectElem.append(element);
+  }    
+}
+
+function updateStatus(){
+  var meterInterval;
+  var state = document.getElementById("state");
+  var stateinfo = document.getElementById("stateInfo");
+  var raininfo = document.getElementById("rainState");
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+console.log(data);      
+      if(rsexist){
+        var sel = document.getElementById("rainsenssel");
+        var opt = sel.options[sel.selectedIndex];
+        rainsenseval = opt.value; 
+        if (rainsenseval == 1){
+          if (data.rsstate == '0'){
+            raininfo.innerHTML="Rain Sensor is <font color='red'>Engaged</font>";
+          }
+          else {
+            raininfo.innerHTML="Rain Sensor is <font color='green'>Disengaged</font>";
+          }       
+        }
+        else {raininfo.innerHTML="";}
+      }
+      if (data.valve == 'CLOSED'){
+        valveState.innerHTML="Valve is <font color='green'>Closed</font>";
+      }
+      else if(data.valve == 'OPEN'){
+        valveState.innerHTML="Valve is <font color='red'>Open</font>";
+      }
+      else if(data.valve == 'MIDWAY'){
+        valveState.innerHTML="Valve is <font color='orange'>Midway</font>";
+      }
+      else{
+        valveState.innerHTML="Valve Status <font color='blue'>Unknown</font>";
+      } 
+      if (data.state == "0"){
+        celement.style.display = "none";
+        state.innerHTML="Programme is disabled.....";
+        stateinfo.innerHTML= "";
+      }
+      else if(data.state == "1"){
+         celement.style.display = "none";
+         state.innerHTML="Sprinkler is Idle Today.....";
+         stateinfo.innerHTML= "";
+      }
+      else if(data.state == "2"){
+        state.innerHTML="Manual Cancellation Requested.....";
+        stateinfo.innerHTML= "";
+      }
+      else if(data.state == "3"){
+        celement.style.display = "none";
+        state.innerHTML="Programme begins in.....";
+        if (data.info > 60){
+        var hours = Math.floor(data.info / 60);
+        var minutes = data.info%60;
+        stateinfo.innerHTML= hours+" hours "+minutes+" minutes";
+        }
+        else {
+          stateinfo.innerHTML= data.info+" minutes";
+        }
+      }
+      else if(data.state == "4"){
+        celement.style.display = "none";
+        state.innerHTML="Todays schedule has completed.....";
+        stateinfo.innerHTML= "";
+      }
+      else if(data.state == "5"){
+        celement.style.display = "block";
+        var minutes = data.info;
+        var zone = data.zone;
+        if (minutes >1){
+          state.innerHTML="Zone "+zone+" - "+minutes+" minutes remain";
+        }
+        else {
+          state.innerHTML="Zone "+zone+" - "+minutes+" minute remains";
+        }
+          stateinfo.innerHTML= "Consumption <span id=\"consumeval\">"+meterzoneval+"</span>/min";
+      }
+      else if(data.state == "6"){
+        var zone = data.zone;
+        celement.style.display = "block";
+        state.innerHTML="Zone "+zone+" *Rain Delay*";
+        stateinfo.innerHTML= "";
+      }
+        else {
+          alert("Update error, try again...");
+        }
+    }
+  };  
+  xhr.open("POST", "updateStatus", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send(); 
+}
+
+function updateZoneList() {
+  var dropdown = document.getElementById('manualrunlist');     
+    var option;
+    dropdown.length = 0;
+    defaultOption = document.createElement('option');
+    defaultOption.text = "Refreshing Configured Zones";
+    dropdown.add(defaultOption);
+    var xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        var data = JSON.parse(this.responseText);
+        dropdown.length = 0;
+        defaultOption = document.createElement('option');
+        defaultOption.text = 'Choose a zone.....';
+        defaultOption.value = '';
+        dropdown.add(defaultOption);
+        dropdown.selectedIndex = 0;  
+        for (let i = 0; i < data.length; i++) {
+          option = document.createElement('option');      
+          option.text = data[i].val+" - "+data[i].name;
+          option.value = data[i].val;
+          dropdown.add(option);
+        }
+      }
+    };  
+    xhr.open("GET", "getZoneList", true);
+    xhr.send();
   }
 
 function addSidebar() { 
 const content = `
 <div class="nav">
-<!--
-<div class="sb-sidenav-menu-heading">Core</div>
--->
-
 <a class="nav-link" href="index.html">
     <div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>
     Dashboard
 </a>
-<!--
-<div class="sb-sidenav-menu-heading">Interface</div>
 
- 
-
-<a class="nav-link collapsed" href="#" data-bs-toggle="collapse" data-bs-target="#collapseLayouts" aria-expanded="false" aria-controls="collapseLayouts">
-    <div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>
-    Layouts
-    <div class="sb-sidenav-collapse-arrow"><i class="fas fa-angle-down"></i></div>
+<div class="sb-sidenav-menu-heading">Configure</div>
+<a class="nav-link" href="configure.html">
+    <div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>
+    Main Config
 </a>
-
-
-
-<div class="collapse" id="collapseLayouts" aria-labelledby="headingOne" data-bs-parent="#sidenavAccordion">
-    <nav class="sb-sidenav-menu-nested nav">
-        <a class="nav-link" href="layout-static.html">Static Navigation</a>
-        <a class="nav-link" href="layout-sidenav-light.html">Light Sidenav</a>
-    </nav>
-</div>
-
-
-
-<a class="nav-link collapsed" href="#" data-bs-toggle="collapse" data-bs-target="#collapsePages" aria-expanded="false" aria-controls="collapsePages">
-    <div class="sb-nav-link-icon"><i class="fas fa-book-open"></i></div>
-    Pages
-    <div class="sb-sidenav-collapse-arrow"><i class="fas fa-angle-down"></i></div>
+<a class="nav-link" href="programme.html">
+    <div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>
+    Programmes
 </a>
-
-
-
-<div class="collapse" id="collapsePages" aria-labelledby="headingTwo" data-bs-parent="#sidenavAccordion">
-    <nav class="sb-sidenav-menu-nested nav accordion" id="sidenavAccordionPages">
-        <a class="nav-link collapsed" href="#" data-bs-toggle="collapse" data-bs-target="#pagesCollapseAuth" aria-expanded="false" aria-controls="pagesCollapseAuth">
-            Authentication
-            <div class="sb-sidenav-collapse-arrow"><i class="fas fa-angle-down"></i></div>
-        </a>
-        <div class="collapse" id="pagesCollapseAuth" aria-labelledby="headingOne" data-bs-parent="#sidenavAccordionPages">
-            <nav class="sb-sidenav-menu-nested nav">
-                <a class="nav-link" href="login.html">Login</a>
-                <a class="nav-link" href="register.html">Register</a>
-                <a class="nav-link" href="password.html">Forgot Password</a>
-            </nav>
-        </div>
-        <a class="nav-link collapsed" href="#" data-bs-toggle="collapse" data-bs-target="#pagesCollapseError" aria-expanded="false" aria-controls="pagesCollapseError">
-            Error
-            <div class="sb-sidenav-collapse-arrow"><i class="fas fa-angle-down"></i></div>
-        </a>
-        <div class="collapse" id="pagesCollapseError" aria-labelledby="headingOne" data-bs-parent="#sidenavAccordionPages">
-            <nav class="sb-sidenav-menu-nested nav">
-                <a class="nav-link" href="401.html">401 Page</a>
-                <a class="nav-link" href="404.html">404 Page</a>
-                <a class="nav-link" href="500.html">500 Page</a>
-            </nav>
-        </div>
-    </nav>
-</div>
-
+<a class="nav-link" href="setMeter.html">
+    <div class="sb-nav-link-icon"><i class="fa fa-leaf"></i></div>
+    Set Meter
+</a>
 
 
 <div class="sb-sidenav-menu-heading">Addons</div>
-<a class="nav-link" href="charts.html">
-    <div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>
-    Charts
-</a>
-<a class="nav-link" href="tables.html">
-    <div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>
-    Tables
+<a class="nav-link" href="leakcheck.html">
+    <div class="sb-nav-link-icon"><i class="fa fa-bath"></i></div>
+    Leak Test
 </a>
 </div>
-</div>
-
--->
 
 <div class="sb-sidenav-footer">
 <div class="small" id="username"></div>
+</div>
+<a class="nav-link" href="#!" onclick="LogoutDialogue()">
+<div class="sb-nav-link-icon"><i class="fas fa-user-circle"></i> Logout</div></a>
 </div>
 `;
 document.getElementById("sidenav-menu-content").innerHTML = content;
@@ -303,6 +502,62 @@ window.addEventListener('DOMContentLoaded', event => {
     }
 
 });
+
+var msgArray = [];
+var lastid;
+if (!!window.EventSource) {
+  var source = new EventSource('/events');
+  source.addEventListener('open', function(e) {
+console.log("Events Connected");
+}, false);
+
+source.addEventListener('error', function(e) {
+  if (e.target.readyState != EventSource.OPEN) {
+    console.log("Events Disconnected");
+  }
+}, false);
+
+source.addEventListener('meter', function(e) {
+  console.log(e);
+  meterzoneval = e.data;
+}, false);
+
+source.addEventListener('message', function(e) {
+  if (sessionStorage.getItem("logdata")){
+    msgArray = JSON.parse(sessionStorage.getItem("logdata"));
+  }
+  console.log(e);
+  var thisid = e.lastEventId;
+  console.log("TID "+thisid);
+  if (thisid == lastid){  console.log("repeat");  return 0;}
+  lastid = thisid;
+  if (e.data != 'INIT'){
+    if (msgArray.length > 0){msgArray.unshift(e.data);}
+    else {msgArray.push(e.data);}
+    if (msgArray.length == 20){
+      msgArray.pop();
+    }
+    sessionStorage.setItem("logdata", JSON.stringify(msgArray));
+    console.log(msgArray);
+  }
+  var storedArray = JSON.parse(sessionStorage.getItem("logdata"));//no brackets
+  console.log(storedArray);
+  if (document.getElementById("eventLog")){
+    var textarea = document.getElementById("eventLog");
+    textarea.value = msgArray.join("\n");
+  }
+  console.log("message", e.data);
+}, false);
+
+source.addEventListener('temperature', function(e) {
+  console.log("temperature", e.data);
+  document.getElementById("temp").innerHTML = e.data;
+}, false);
+}
+else {
+  console.log("WE source already");
+}
+
 
 var TZdata = [
     {

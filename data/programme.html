@@ -17,6 +17,10 @@
             var data;
             var counter = 1;
             var program ="A";
+            const queryString = window.location.search;
+            const urlParams = new URLSearchParams(queryString);
+            const cnftype = urlParams.get('inc');
+            console.log(cnftype);
             $(document).ready(function () {
           $("table.order-list").on("click", ".ibtnDel", function (event) {
         $(this).closest("tr").remove();       
@@ -27,28 +31,24 @@
 function addRow(thiscount){ 
   var newRow = $("<tr>");
   var cols = "";
-  cols += '<td><input type="text" class="form-control" id="'+program+'zoneName' + thiscount + '" name="'+program+'zoneName' + thiscount + '"/></td>';
-  cols += '<td><input type="text" class="form-control" id="'+program+'zoneDur' + thiscount + '" name="'+program+'zoneDur' + thiscount + '"/></td>';
+  cols += '<td><input type="text" class="form-control" id="'+program+'zoneName' + thiscount + '" name="'+program+'zoneName' + thiscount + '"/readonly></td>';
+  cols += '<td><input type="text" class="form-control" id="'+program+'zoneDur' + thiscount + '" maxlength="3" name="'+program+'zoneDur' + thiscount + '"/></td>';
   newRow.append(cols);
   $("table.order-list"+program).append(newRow);
 }
 
 function submitConfig(){
-  console.log(data);
   for (i = 3; i < 6; i++) {
     counter=1;
     program = "A";
     if(i==4){program ="B"};
     if(i==5){program ="C"};
-    console.log("program is "+program);
     data.zones.forEach(function(zone) {    
       zone[i] =  document.getElementById(program+"zoneDur"+counter).value;
       counter++;                     
-      console.log("counter "+counter);
     });
   }
   data.pass = '';
-  console.log(data);
   let err = [];
   var msg = '';
   var wkflw = {};
@@ -74,15 +74,12 @@ function submitConfig(){
   }
   wkflw.programa = programmea;
   wkflw.programb = programmeb;
-  wkflw.programc = programmec;
-  console.log(wkflw); 
+  wkflw.programc = programmec; 
   if (err.length==0){
-    console.log('NO ERRORS');
     var xhr = new XMLHttpRequest();
     xhr.onreadystatechange = function() {
       if (this.readyState == 4 && this.status == 200) {
         var returndata = JSON.parse(this.responseText);
- 
                       if (returndata.s == "0"){
                         var xhx = new XMLHttpRequest();
                         xhx.onreadystatechange = function() {
@@ -95,7 +92,6 @@ function submitConfig(){
                        }
                       }; 
                     var jsonstr = JSON.stringify(wkflw);
-                    console.log(jsonstr);
                     xhx.open("POST", "updateConfig", true);
                     xhx.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
                     xhx.send("testval="+jsonstr+"&filetype=program");
@@ -107,7 +103,6 @@ function submitConfig(){
       }
     };  
     var jsonstr = JSON.stringify(data);
-    console.log(jsonstr);
     xhr.open("POST", "updateConfig", true);
     xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
     xhr.send("testval="+jsonstr+"&filetype=cfg");
@@ -152,22 +147,16 @@ function getConf(){
                       return 1;
                       }
                     }
-                  /////////////
                    document.getElementById("stA").value = data2.programa[0];
                    document.getElementById("stB").value = data2.programb[0];
                    document.getElementById("stC").value = data2.programc[0];
                    for (i = 1; i < 4; i++) {
-                    //program = "A";
-                    //if(i==2){program ="B"};
-                    //if(i==3){program ="C"};
                     for (j = 1; j < 8; j++) { 
                       if (i==1){document.getElementById("A-"+j).checked = data2.programa[j];}
                       if (i==2){document.getElementById("B-"+j).checked = data2.programb[j];}
                       if (i==3){document.getElementById("C-"+j).checked = data2.programc[j];}
                     }
                   }
-                   //document.getElementById(program+"-"+j).checked
-                  /////////////  
                   }
                 };
                 xhx.open("POST", "getConf", true);
@@ -188,21 +177,7 @@ function getConf(){
             <!-- Navbar Search -->
             <form class="d-none d-md-inline-block form-inline ms-auto me-0 me-md-3 my-2 my-md-0">
             </form>
-
-            <!-- Navbar -->
-            <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fas fa-user fa-fw"></i></a>
-                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                      <li><a class="dropdown-item" href="/configure.html">Configure</a></li>
-                        <li><a class="dropdown-item" href="/programme.html">Programme</a></li>
-                        <li><hr class="dropdown-divider" /></li>
-                        <li><a class="dropdown-item" href="#!" onclick="LogoutDialogue()">Logout</a></li>
-                    </ul>
-                </li>
-            </ul>
-        </nav> 
-        
+        </nav>        
         <div id="layoutSidenav">
             <div id="layoutSidenav_nav">
                 <nav class="sb-sidenav accordion sb-sidenav-dark" id="sidenavAccordion">
@@ -233,234 +208,19 @@ function getConf(){
                           <div class="col-lg-12" id="title">
                             <h1>Zone Programmes</h1>
                           </div>
-                        </div><!-- /.row -->
-                        <div class="row">
-                          <div class="col-xs-4 col-md-6">
-                            <div class="alert alert-info" id="pwinfo">
-                              PROGRAMME [A]
-                            </div>
-                          </div>
-                        </div>                         
-                        <div class="row">
-                        <div class="col-xs-4 col-md-3">
-                            <div class="form-group">
-                             <!-- <form>-->
-                                <div class="form-group">
-                                    <label for="starttimeA">Start Time 0000-2359
-                                    <input type="text" class="form-control" id="stA" name="stA" placeholder="1800">
-                                      </label>
-                                    <label class="radio-inline">   
-                                      <div class="weekDays-selector">
-                                        <input type="checkbox" id="A-1" class="weekday" />
-                                        <label for="weekday-mon">M</label>
-                                        <input type="checkbox" id="A-2" class="weekday" />
-                                        <label for="weekday-tue">T</label>
-                                        <input type="checkbox" id="A-3" class="weekday" />
-                                        <label for="weekday-wed">W</label>
-                                        <input type="checkbox" id="A-4" class="weekday" />
-                                        <label for="weekday-thu">T</label>
-                                        <input type="checkbox" id="A-5" class="weekday" />
-                                        <label for="weekday-fri">F</label>
-                                        <input type="checkbox" id="A-6" class="weekday" />
-                                        <label for="weekday-sat">S</label>
-                                        <input type="checkbox" id="A-7" class="weekday" />
-                                        <label for="weekday-sun">S</label>
-                                      </div>  
-                                    </label>
-                                </div>
-                              </div>
-                            </div>
                         </div>
-                      </br></br>
-                    <div class="row">
-                      <div class="col-xs-4 col-md-6">
-                        <div class="alert alert-info">
-                          Zone Usage
-                        </div>
-                      </div>
-                    </div> 
-                    <div class="row">
-                        <div class="col-xs-4 col-md-6">
-                            <div class="form-group">
-                              <form>
-                                <div class="form-group">
-                                    <table id="myTable" class=" table order-listA">
-                                        <thead>
-                                            <tr>
-                                                <td>Name</td>
-                                                <td>Duration</td>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
 
-                                        </tbody>
-                                        <tfoot>
-                                            <tr>
-                                                <td>    
-                                                    </br>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                            </tr>
-                                        </tfoot>
-                                    </table>
-                                </div>
-                             </div>  
-                         </div>
-             
-                <div class="row">
-                  <div class="col-xs-4 col-md-6">
-                    <div class="alert alert-info" id="pwinfo">
-                      PROGRAMME [B]
+                        <div id="programmeListing"></div>
+
                     </div>
-                  </div>
-                </div>                         
-                <div class="row">
-                <div class="col-xs-4 col-md-3">
-                    <div class="form-group">
-                     <!-- <form>-->
-                        <div class="form-group">
-                          <label for="starttimeB">Start Time 0000-2359
-                          <input type="text" class="form-control" id="stB" name="stB" placeholder="1800">
-                          </label>
-                          <label class="radio-inline">   
-                            <div class="weekDays-selector">
-                              <input type="checkbox" id="B-1" class="weekday" />
-                              <label for="weekday-mon">M</label>
-                              <input type="checkbox" id="B-2" class="weekday" />
-                              <label for="weekday-tue">T</label>
-                              <input type="checkbox" id="B-3" class="weekday" />
-                              <label for="weekday-wed">W</label>
-                              <input type="checkbox" id="B-4" class="weekday" />
-                              <label for="weekday-thu">T</label>
-                              <input type="checkbox" id="B-5" class="weekday" />
-                              <label for="weekday-fri">F</label>
-                              <input type="checkbox" id="B-6" class="weekday" />
-                              <label for="weekday-sat">S</label>
-                              <input type="checkbox" id="B-7" class="weekday" />
-                              <label for="weekday-sun">S</label>
-                            </div>  
-                          </label>
-                        </div>
-                      </div>
-                    </div>
+                <div class="col-xs-1 col-md-1">        
+                  <input class="btn btn-success" type="button" value="Submit" onclick="submitConfig()">
                 </div>
-              </br></br>
-            <div class="row">
-              <div class="col-xs-4 col-md-6">
-                <div class="alert alert-info">
-                  Zone Usage
-                </div>
-              </div>
-            </div> 
-            <div class="row">
-                <div class="col-xs-4 col-md-6">
-                    <div class="form-group">
-                      <form>
-                        <div class="form-group">
-                            <table id="myTable" class=" table order-listB">
-                                <thead>
-                                    <tr>
-                                        <td>Name</td>
-                                        <td>Duration</td>
-                                    </tr>
-                                </thead>
-                                <tbody>
-
-                                </tbody>
-                                <tfoot>
-                                    <tr>
-                                        <td>    
-                                            </br>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                        </div>
-                     </div>  
-                 </div>
-    
-        <div class="row">
-          <div class="col-xs-4 col-md-6">
-            <div class="alert alert-info" id="pwinfo">
-              PROGRAMME [C]
-            </div>
-          </div>
-        </div>                         
-        <div class="row">
-        <div class="col-xs-4 col-md-3">
-            <div class="form-group">
-             <!-- <form>-->
-                <div class="form-group">
-                  <label for="starttimeB">Start Time 0000-2359
-                  <input type="text" class="form-control" id="stC" name="stC" placeholder="1800">
-                  </label>
-                  <label class="radio-inline">   
-                    <div class="weekDays-selector">
-                      <input type="checkbox" id="C-1" class="weekday" />
-                      <label for="weekday-mon">M</label>
-                      <input type="checkbox" id="C-2" class="weekday" />
-                      <label for="weekday-tue">T</label>
-                      <input type="checkbox" id="C-3" class="weekday" />
-                      <label for="weekday-wed">W</label>
-                      <input type="checkbox" id="C-4" class="weekday" />
-                      <label for="weekday-thu">T</label>
-                      <input type="checkbox" id="C-5" class="weekday" />
-                      <label for="weekday-fri">F</label>
-                      <input type="checkbox" id="C-6" class="weekday" />
-                      <label for="weekday-sat">S</label>
-                      <input type="checkbox" id="C-7" class="weekday" />
-                      <label for="weekday-sun">S</label>
-                    </div>  
-                  </label>
-                </div>
-              </div>
-            </div>
-        </div>
-      </br></br>
-    <div class="row">
-      <div class="col-xs-4 col-md-6">
-        <div class="alert alert-info">
-          Zone Usage
-        </div>
-      </div>
-    </div> 
-    <div class="row">
-        <div class="col-xs-4 col-md-6">
-            <div class="form-group">
-              <form>
-                <div class="form-group">
-                    <table id="myTable" class=" table order-listC">
-                        <thead>
-                            <tr>
-                                <td>Name</td>
-                                <td>Duration</td>
-                            </tr>
-                        </thead>
-                        <tbody>
-
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <td>    
-                                    <input class="btn btn-success" type="button" value="Submit" onclick="submitConfig()">
-                                </td>
-                            </tr>
-                            <tr>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-             </div>  
-         </div>
-</main>
-
+          </main>
                 <footer class="py-4 bg-light mt-auto">
                     <div class="container-fluid px-4">
                         <div class="d-flex align-items-center justify-content-between small">
-                            <div class="text-muted">Copyright &copy; Jordan Rubin 2021</div>
+                            <div class="text-muted">Copyright &copy; Jordan Rubin 2022</div>
                             <div>
                                 <a href="#">Privacy Policy</a>
                                 &middot;
@@ -473,8 +233,11 @@ function getConf(){
         </div>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
         <script>
+          printProgrammes();
           getConf();
-          addSidebar();
+          if (cnftype != 1){
+            addSidebar();
+          }
         </script>
     </body>
     <script>       

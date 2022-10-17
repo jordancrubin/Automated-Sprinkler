@@ -8,6 +8,8 @@
 #include <Ballvalve.h>
 #include <Watermeter.h>
 #include <SPIFFS.h>
+#include <SD.h>
+#include <FS.h>
 #include <ArduinoJson.h>
 // ensure this library description is only included once
 #ifndef Sprinkler_h
@@ -29,7 +31,7 @@ class Zone {
     Zone(int, const char*);
     const char* description;
     int duration;
-    int gpio;
+    int port;
     bool open;
     char* statusMsg;
     const char* thisname;
@@ -43,20 +45,25 @@ class Zone {
     int days[7] = { 0 };
     const char * enabled;
     bool hasRainsensor;
-    int LED;
+    bool rainsensorStatus;
+    int pf575address;
     bool inManual;
+    bool manualZoneChange;
     int maxZones = 12;
     char measure;
     int program;
     int rainSensorGpio;
     int startTime;
     int backupStartTime;
+    bool backupDay;
     int zoneCount = 0;
     int zoneRemaining;
-    void addMeter(int,bool,char,long,bool,double);
+    void activateSolenoid(int);
+    void addMeter(int,bool,char,long,bool,double,int,bool);
     void addRainSensor(int);
     void addValve(int,int,int,bool); 
     const char* addZone(int intval, char* charval);
+    void begin(int);
     void cancelManual(void);
     void clearEnabled();
     void closeZone(const char*);
@@ -65,12 +72,15 @@ class Zone {
     const char * getDescription(const char *);
     char getMeasureType();
     int getProgram();
+    bool getRainSensor();
+    bool getHasRainSensor();
     const char * getSchedZone(int);
     int getZoneCount();
     void getZoneNames(char (& Array)[12][20]);
     int getZoneRemaining();
-    void info();
     bool isActive();
+    bool isInManualProgram();
+    void isInManualProgram(bool);
     bool isCanceled();
     const char* isEnabled(void);
     bool isSchedForToday(tm *);
@@ -79,31 +89,33 @@ class Zone {
     void offsetManual(const char *, tm *);
     void openZone(const char*);
     double readConsumption(); 
-    double readMeter(char);/////////////////////////// huh
-    double readMeter(void);///////////////////////////// huh
+    double readMeter(char);/////////////////////// huh
+    double readMeter(void);/////////////////////// huh
+    bool readRainSensor(void);
     void removeZone(const char*);
     bool runZone(const char*);
     void setCanceled(bool);
     void setConsumption(void);
     void setDescription(const char*, const char*);
+    void setMeter(double);
     void setProgram(int);
-
+    void setRainsensorStatus(bool);
+    void setManualZoneChange(bool);
     const char* setValve(const char*);
-    
     bool startSpiffFs();
-    void statusLedBlink(int,int);
+    bool startSDfs();
     int timeToProgStart(tm *);
+    void updateMeter();
     int valveLastDuration(char*);
     int valveMaxTravelTime(void);
     void valveMaxTravelTime(int);
     const char* valvePosition(void);
-    void zoneInfo();
-    void zoneInfo(const char*);
 
   ////////////// library-accessible "private" interface
   private:
     int getIndex(const char*);
     int getIndex(int);
     int value;
+    void writePf575(uint16_t);
   };
 #endif

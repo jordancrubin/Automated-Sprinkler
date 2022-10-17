@@ -17,7 +17,7 @@
             cookieChk();
             const queryString = window.location.search;
             const urlParams = new URLSearchParams(queryString);
-            const cnftype = urlParams.get('newcnf')
+            const cnftype = urlParams.get('newcnf');
             console.log(cnftype);
             var counter = 2;
             var rowIdx=1;
@@ -26,10 +26,10 @@
               if(counter==9){return;}  
         // Adding a row inside the tbody.
         $('#zonebody').append(`<tr id="R${++rowIdx}">
-          <td><input type="text" class="form-control" id="zoneGpio${counter}" size="2" maxlength="2" name="zoneGpio${counter}"></td>
-          <td><input type="text" class="form-control" id="zoneName${counter}" name="zoneName${counter}"/></td>
+          <td><input type="text" class="form-control" id="zonePort${counter}" size="2" maxlength="2" name="zonePort${counter}"></td>
+          <td><input type="text" class="form-control" id="zoneName${counter}" maxlength="19" name="zoneName${counter}"/></td>
           <td><input type="text" class="form-control" id="zoneDesc${counter}" name="zoneDesc${counter}"/></td>
-          <td><input type="button" class="ibtnDel btn btn-md btn-danger "  value="Delete"></td>`);
+          <td><input type="button" class="ibtnDel btn btn-md btn-danger" value="Delete"></td>`);
           counter++;
       });
         $("table.order-list").on("click", ".ibtnDel", function (event) {
@@ -51,8 +51,8 @@
           var id = $(this).attr('id');
           var dig = parseInt(id.substring(1));     
           var subdig = dig -1;
-          document.getElementById('zoneGpio'+dig).id = 'zoneGpio'+subdig; 
-          document.getElementById('zoneGpio'+subdig).name = 'zoneGpio'+subdig;
+          document.getElementById('zonePort'+dig).id = 'zonePort'+subdig; 
+          document.getElementById('zonePort'+subdig).name = 'zonePort'+subdig;
           document.getElementById('zoneName'+dig).id = 'zoneName'+subdig; 
           document.getElementById('zoneName'+subdig).name = 'zoneName'+subdig;
           document.getElementById('zoneDesc'+dig).id = 'zoneDesc'+subdig; 
@@ -75,12 +75,12 @@
         var msg = '';
         a = document.getElementById("adminpass1").value; wkflw.pass = a;
         b = document.getElementById("adminpass2").value;
-        c = document.getElementById("metreGpio").value; gpios.push(c);  wkflw.mtrio = c;
-        if (document.getElementById("metreMeasureL").checked == true){w="l";}
+        c = document.getElementById("meterGpio").value; gpios.push(c);  wkflw.mtrio = c;
+        if (document.getElementById("meterMeasureL").checked == true){w="l";}
         else {w="g";}
         wkflw.meas = w;
-        r = document.getElementById("metredebounce").value; wkflw.mtrdeb = r;
-        s = document.getElementById("metreinc").value; wkflw.mtrinc = s;
+        r = document.getElementById("meterdebounce").value; wkflw.mtrdeb = r;
+        s = document.getElementById("meterinc").value; wkflw.mtrinc = s;
         d = document.getElementById("valveOpenGpio").value; gpios.push(d); wkflw.valopio = d;
         e = document.getElementById("valveCloseGpio").value; gpios.push(e); wkflw.valclio = e;
         f = document.getElementById("valveRelayGpio").value; gpios.push(f); wkflw.valrlyio = f;
@@ -95,7 +95,7 @@
         t = opt.value; wkflw.timez = t;
         tn = opt.text; wkflw.timezname = tn;
         if (!t){err.push('A timezone must be choosen.');}
-        if ((c<1) || (c>40)) {err.push('The Metre GPIO value is out of bounds.');} 
+        if ((c<1) || (c>40)) {err.push('The Meter GPIO value is out of bounds.');} 
         if ((d<1) || (d>40)) {err.push('The Valve Open GPIO value is out of bounds.');} 
         if ((e<1) || (e>40)) {err.push('The Valve Closed value is out of bounds.');} 
         if ((f<1) || (f>40)) {err.push('The Valve Relay value is out of bounds.');} 
@@ -103,11 +103,12 @@
         if (g){
           if ((g<1) || (g>40)) {err.push('The Rain Sensor GPIO value is out of bounds.');} 
         }
-        if (!s) {err.push('Metre Increment should be the flwo value of each pulse');}
+        if (!s) {err.push('Meter Increment should be the flwo value of each pulse');}
         var inc = 1;
         for (var z = 1; z < counter; z++) {
             let thiszone = [];
-            g= document.getElementById("zoneGpio"+z).value; gpios.push(g); thiszone.push(g);
+            //g= document.getElementById("zoneGpio"+z).value; gpios.push(g); thiszone.push(g); //change the new one to "zonePort"+z
+            g= document.getElementById("zonePort"+z).value; thiszone.push(g);
             h= document.getElementById("zoneName"+z).value; thiszone.push(h); znames.push(h);
             i= document.getElementById("zoneDesc"+z).value; thiszone.push(i);
             if (cnftype == 1){thiszone.push(0);thiszone.push(0);thiszone.push(0);}    
@@ -120,7 +121,7 @@
                else {thiszone.push(0);}
            }
             wkflw.zones.push(thiszone);
-            if ((g<1) || (g>40)) {err.push('The Zone ['+z+'] GPIO value is out of bounds.');} 
+            if ((g<1) || (g>16)) {err.push('The Zone ['+z+'] Port value is out of bounds.');} 
             if ((h.length==0)||(h.length>30)){err.push('The Zone ['+z+'] requires a name not to exceed 30 chars.');}  
             if ((h.length==0)||(h.length>70)){err.push('The Zone ['+z+'] requires a description not to exceed 70 chars.');}  
             inc++;   
@@ -186,11 +187,11 @@ function getConf(){
                     return 1;
                   }
                 }
-                document.getElementById("metreGpio").value = data.mtrio;
+                document.getElementById("meterGpio").value = data.mtrio;
                 if (data.meas == "l"){
-                  document.getElementById("metreMeasureL").checked = true;
+                  document.getElementById("meterMeasureL").checked = true;
                 }
-                else {document.getElementById("metreMeasureG").checked = true;}
+                else {document.getElementById("meterMeasureG").checked = true;}
                 var selectTz = document.getElementById('timezone');
                 console.log("DATATIMEZ "+data.timez);
                 console.log("TIMEZNAME "+data.timezname);
@@ -208,7 +209,7 @@ function getConf(){
                   if (counter !=1){
                     $("#addrow").triggerHandler("click");
                   }
-                  document.getElementById("zoneGpio"+counter).value = zone[0];
+                  document.getElementById("zonePort"+counter).value = zone[0];
                   document.getElementById("zoneName"+counter).value = zone[1];
                   document.getElementById("zoneDesc"+counter).value = zone[2]; 
                   if (data.rainsens){
@@ -235,23 +236,11 @@ function getConf(){
             <!-- Navbar Search -->
             <form class="d-none d-md-inline-block form-inline ms-auto me-0 me-md-3 my-2 my-md-0">
             </form>
-            <!-- Navbar -->
-            <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fas fa-user fa-fw"></i></a>
-                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                        <li><a class="dropdown-item" href="#!">Activity Log</a></li>
-                        <li><hr class="dropdown-divider" /></li>
-                        <li><a class="dropdown-item" href="#!" onclick="LogoutDialogue()">Logout</a></li>
-                    </ul>
-                </li>
-            </ul>
         </nav>    
         <div id="layoutSidenav">
             <div id="layoutSidenav_nav">
                 <nav class="sb-sidenav accordion sb-sidenav-dark" id="sidenavAccordion">
                     <div class="sb-sidenav-menu" id="sidenav-menu-content"> 
- 
                     </div>
                 </nav>
             </div>
@@ -305,7 +294,7 @@ function getConf(){
                         <div class="row">
                           <div class="col-xs-4 col-md-6">
                             <div class="alert alert-info">
-                              Metre Configuration
+                              Meter Configuration
                             </div>
                           </div>
                         </div>           
@@ -315,7 +304,7 @@ function getConf(){
                                 <form>
                                   <div class="form-group">
                                     <label>GPIO Pin</label>
-                                    <input type="text" class="form-control" id="metreGpio" size="2" maxlength="2" placeholder="15">
+                                    <input type="text" class="form-control" id="meterGpio" size="2" maxlength="2" placeholder="15">
                                   </div>
                                </div>     
                             </div>            
@@ -323,27 +312,30 @@ function getConf(){
                                   <div class="form-group">
                                     <label>Measurement</label></div><div>
                                     <label class="radio-inline">
-                                      <input type="radio" name="metreMeasure" id="metreMeasureG" value="g" checked="checked"> Gallons
+                                      <input type="radio" name="meterMeasure" id="meterMeasureG" value="g" checked="checked"> Gallons
                                     </label>
                                     <label class="radio-inline">
-                                      <input type="radio" name="metreMeasure" id="metreMeasureL" value="l"> Litres
+                                      <input type="radio" name="meterMeasure" id="meterMeasureL" value="l"> Litres
                                     </label>
                                   </div>
                                 </div>
                                 <div class="col-xs-4 col-md-2">
                                   <div class="form-group">
                                     <label>Debounce Delay mS</label></div><div>
-                                      <input type="text" class="form-control" id="metredebounce" size="3" maxlength="3" value="200">
+                                      <input type="text" class="form-control" id="meterdebounce" size="3" maxlength="3" value="200">
                                   </div>
                                 </div>
                                 <div class="row"> 
                                 <div class="col-xs-4 col-md-2">
                                   <div class="form-group">
                                     <label>Increment of pulse</label></div><div>
-                                      <input type="text" class="form-control" id="metreinc" size="3" maxlength="3" value=".1">
+                                      <input type="text" class="form-control" id="meterinc" size="3" maxlength="3" value=".1">
                                   </div>
                                 </div>
                               </div>
+
+
+
                         </div>
                       </br></br>
 
@@ -367,7 +359,7 @@ function getConf(){
                               <div class="col-xs-4 col-md-2">
                                   <div class="form-group">
                                     <label>Close GPIO</label>
-                                    <input type="text" class="form-control" id="valveCloseGpio" size="2" maxlength="2" placeholder="18">
+                                    <input type="text" class="form-control" id="valveCloseGpio" size="2" maxlength="2" placeholder="12">
                                   </div>
                               </div>
                               <div class="col-xs-4 col-md-2">
@@ -398,7 +390,7 @@ function getConf(){
                               <div class="col-xs-4 col-md-2">
                                   <div class="form-group">
                                     <label>Rain Sensor GPIO</label>
-                                    <input type="text" class="form-control" id="rainSenseGpio" size="2" maxlength="2" placeholder="19">
+                                    <input type="text" class="form-control" id="rainSenseGpio" size="2" maxlength="2" placeholder="2">
                                   </div>
                               </div>
                               <div class="col-xs-4 col-md-2">
@@ -426,7 +418,7 @@ function getConf(){
                                     <table id="myTable" class=" table order-list">
                                         <thead>
                                             <tr>
-                                                <td>GPIO</td>
+                                                <td>Port</td>
                                                 <td>Name</td>
                                                 <td>Description</td>
                                             </tr>
@@ -434,10 +426,10 @@ function getConf(){
                                         <tbody id="zonebody">
                                             <tr id="R1">
                                                 <td class="col-sm-1">
-                                                    <input type="text" class="form-control" id="zoneGpio1" size="2" maxlength="2">
+                                                    <input type="text" class="form-control" id="zonePort1" size="2" maxlength="2">
                                                 </td>
                                                 <td class="col-sm-2">
-                                                    <input type="text" name="zoneName1" id="zoneName1" class="form-control"/>
+                                                    <input type="text" name="zoneName1" id="zoneName1" class="form-control" maxlength="20"/>
                                                 </td>
                                                 <td class="col-sm-5">
                                                     <input type="text" name="zoneDesc1" id="zoneDesc1" class="form-control"/>
@@ -466,7 +458,7 @@ function getConf(){
                 <footer class="py-4 bg-light mt-auto">
                     <div class="container-fluid px-4">
                         <div class="d-flex align-items-center justify-content-between small">
-                            <div class="text-muted">Copyright &copy; Jordan Rubin 2021</div>
+                            <div class="text-muted">Copyright &copy; Jordan Rubin 2022</div>
                             <div>
                                 <a href="#">Privacy Policy</a>
                                 &middot;
