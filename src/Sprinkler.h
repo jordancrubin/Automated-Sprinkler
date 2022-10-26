@@ -8,24 +8,22 @@
 #include <Ballvalve.h>
 #include <Watermeter.h>
 #include <SPIFFS.h>
-#include <SD.h>
-#include <FS.h>
+//#include <SD.h> // check for removal
+//#include <FS.h> //check for removal
 #include <ArduinoJson.h>
+#include <detaBaseArduinoESP32.h>
+#include <LiquidCrystal_PCF8574.h>
 // ensure this library description is only included once
 #ifndef Sprinkler_h
 #define Sprinkler_h
 
 // library interface description
-// int statusledgpio, int hardresetgpio, int facdefdelayms
-// This is the onboard LED gpio, the gpio assigned as the factory reset button
-// and how many seconds for factory default with the button in milliseconds.
-// Usage of the onboard ESP32 led is generally 2, default reset gpio for this
-// project is 23, and 5 second wait is 5000 (2,23,5000)
 class SPRINKLERSYSTEM
 {
   ////////////// user-accessible "public" interface
   public: 
-  SPRINKLERSYSTEM(int);   
+  SPRINKLERSYSTEM(int , int, int, int );   
+  //SPRINKLERSYSTEM(int); 
 class Zone {
   public:
     Zone(int, const char*);
@@ -36,55 +34,74 @@ class Zone {
     char* statusMsg;
     const char* thisname;
 };
+    DetaBaseObject * detaObj;
     FIVEWIREVALVE * thisvalve;
+    LiquidCrystal_PCF8574 * lcd; 
     WATERMETER * flowmeter;
+    WiFiClientSecure client;
     Zone * storedZones[12];
     bool active;
+    int backupStartTime;
+    bool backupDay;
     bool canceled; 
     double consumption;  
     int days[7] = { 0 };
+    bool detabaseconnect;
     const char * enabled;
+    bool hasDetabase;
     bool hasRainsensor;
-    bool rainsensorStatus;
-    int pf575address;
     bool inManual;
+    int lcdaddress;
+    int lcdrows;
+    int lcdcols;
+    bool lcdlock;
+    int lcdLockDelay = 20;
     bool manualZoneChange;
     int maxZones = 12;
     char measure;
+    int pf575address;
     int program;
     int rainSensorGpio;
+    bool rainsensorStatus;
     int startTime;
-    int backupStartTime;
-    bool backupDay;
     int zoneCount = 0;
     int zoneRemaining;
     void activateSolenoid(int);
+    bool addDetabase(const char* id,const char* name,const char* apikey);
     void addMeter(int,bool,char,long,bool,double,int,bool);
     void addRainSensor(int);
     void addValve(int,int,int,bool); 
     const char* addZone(int intval, char* charval);
-    void begin(int);
+    void begin();
     void cancelManual(void);
     void clearEnabled();
     void closeZone(const char*);
     void facdef();
     void factoryDefaultChk();
+    bool getDatabaseActive();
     const char * getDescription(const char *);
+    bool getHasRainSensor();
     char getMeasureType();
     int getProgram();
     bool getRainSensor();
-    bool getHasRainSensor();
     const char * getSchedZone(int);
     int getZoneCount();
     void getZoneNames(char (& Array)[12][20]);
     int getZoneRemaining();
     bool isActive();
-    bool isInManualProgram();
-    void isInManualProgram(bool);
     bool isCanceled();
     const char* isEnabled(void);
+    bool isInManualProgram();
+    void isInManualProgram(bool);
     bool isSchedForToday(tm *);
     bool isTodayComplete(tm *);
+    void lcdClearRow(int);
+    void lcdDisplaySwVersion(const char *);
+    void lcdPower(bool);
+    void lcdPrint(const char *, int, int, const char *);
+    void lcdPrint(const char *, int, int, int);
+    void lcdPrintConcat(const char *);
+    void lcdPrintConcat(int);
     bool meterMoved(void); 
     void offsetManual(const char *, tm *);
     void openZone(const char*);
@@ -103,7 +120,6 @@ class Zone {
     void setManualZoneChange(bool);
     const char* setValve(const char*);
     bool startSpiffFs();
-    bool startSDfs();
     int timeToProgStart(tm *);
     void updateMeter();
     int valveLastDuration(char*);

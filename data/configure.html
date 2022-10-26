@@ -84,7 +84,15 @@
         d = document.getElementById("valveOpenGpio").value; gpios.push(d); wkflw.valopio = d;
         e = document.getElementById("valveCloseGpio").value; gpios.push(e); wkflw.valclio = e;
         f = document.getElementById("valveRelayGpio").value; gpios.push(f); wkflw.valrlyio = f;
-        g = document.getElementById("rainSenseGpio").value; gpios.push(g); wkflw.rainsens = g;
+        j = document.getElementById("rainSenseGpio").value; gpios.push(j); wkflw.rainsens = j;
+        k = document.getElementById("Detaname").value; wkflw.detaname = k;
+        l = document.getElementById("DetaId").value; wkflw.detaid = l;
+        m = document.getElementById("DetaApiKey").value; wkflw.detaapikey = m;
+
+        if (((k)&&(!l)) || ((k)&&(!m))) {
+          err.push('The detabase info is only partially filled out.');
+        } 
+
         wkflw.zones = zones;
         if (a!=b){err.push('The admin password did not match the re-typed password.');}
         if (cnftype ==1){
@@ -100,14 +108,13 @@
         if ((e<1) || (e>40)) {err.push('The Valve Closed value is out of bounds.');} 
         if ((f<1) || (f>40)) {err.push('The Valve Relay value is out of bounds.');} 
         if ((r<5) || (r>999)) {err.push('Meter debounce [ms] is beyond params');}
-        if (g){
-          if ((g<1) || (g>40)) {err.push('The Rain Sensor GPIO value is out of bounds.');} 
+        if (j){
+          if ((j<1) || (j>40)) {err.push('The Rain Sensor GPIO value is out of bounds.');} 
         }
         if (!s) {err.push('Meter Increment should be the flwo value of each pulse');}
         var inc = 1;
         for (var z = 1; z < counter; z++) {
             let thiszone = [];
-            //g= document.getElementById("zoneGpio"+z).value; gpios.push(g); thiszone.push(g); //change the new one to "zonePort"+z
             g= document.getElementById("zonePort"+z).value; thiszone.push(g);
             h= document.getElementById("zoneName"+z).value; thiszone.push(h); znames.push(h);
             i= document.getElementById("zoneDesc"+z).value; thiszone.push(i);
@@ -183,7 +190,7 @@ function getConf(){
                 console.log(data);
                 if (data.e){
                   if (data.e == "np"){
-                    alert("You do not have permission to accces this feature.");
+                    alert("You do not have permission to access this feature.");
                     return 1;
                   }
                 }
@@ -214,6 +221,11 @@ function getConf(){
                   document.getElementById("zoneDesc"+counter).value = zone[2]; 
                   if (data.rainsens){
                     document.getElementById("rainSenseGpio").value = data.rainsens;
+                  }
+                  if (data.detaname){
+                    document.getElementById("Detaname").value = data.detaname;
+                    document.getElementById("DetaId").value = data.detaid;
+                    document.getElementById("DetaApiKey").value = data.detaapikey;
                   }
                   progOb[counter] = {};
                   progOb[counter].A = zone[3];
@@ -291,6 +303,34 @@ function getConf(){
                         </div>
                       </br></br>
 
+
+                      <div class="row">              
+                        <div class="col-xs-4 col-md-6">
+                          <div class="alert alert-info">
+                            Deta Analitical Storage at  <a href="https://web.deta.sh" target="_blank">deta.sh account creation</a>
+                          </div>
+                        </div>
+                      </div> 
+                      <div class="row">
+                        <div class="col-xs-4 col-md-3">
+                          <div class="form-group">
+                           <!-- <form>-->
+                              <div class="form-group">
+                                <label for="exampleInputEmail1">Detabase Name</label>
+                                <input type="text" class="form-control" id="Detaname" placeholder="Mydetabasename">
+                              </div>
+                              <div class="form-group">
+                                <label for="exampleInputPassword1">Deta ID</label>
+                                <input type="text" class="form-control" id="DetaId" placeholder="q9xa4ta7">
+                              </div>
+                              <div class="form-group">
+                                <label for="exampleInputPassword1">API Key</label>
+                                <input type="text" class="form-control" id="DetaApiKey" placeholder="q9xa4ta7_lrWTr2QWasY5Z6YTEaBYe8qCTXTZuVMT">
+                              </div>
+                            </div>
+                          </div>
+                      </div>
+                    </br></br>
                         <div class="row">
                           <div class="col-xs-4 col-md-6">
                             <div class="alert alert-info">
@@ -333,12 +373,8 @@ function getConf(){
                                   </div>
                                 </div>
                               </div>
-
-
-
                         </div>
                       </br></br>
-
                         <div class="row">              
                           <div class="col-xs-4 col-md-6">
                             <div class="alert alert-info">
