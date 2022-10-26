@@ -24,16 +24,12 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
-#include <LiquidCrystal_PCF8574.h> 
 #include "mbedtls/md.h"
- #include <SD.h>
- #include <FS.h>
- #include <HTTPClient.h>
+#include <HTTPClient.h>
 #include <Sprinkler.h>
 #include <time.h>
-#include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <WiFiAP.h>
-//#include <Wire.h> 
 
 const char* deviceName = "sprinkler32";  //Mdns name sprinkler32.local
 double lastTimepoll = -60000;
@@ -53,12 +49,6 @@ bool zoneChangeFlag = false;
 bool powerFlag = false;
 const char* version = "1.0.0b";
 char selectedProgram[20];
-
-//const char * menu[3][5] = {
-//  {"CANCEL PROGRAMME","START PROGRAMME","REBOOT UNIT","SW VERSION","EXIT MENU"},
-//  {"BACk","Ctest1","Ctest2","Ctest3","Ctest4"} 
-//};
-
 const char * menu[3][5] = {
   {"CANCEL PROGRAMME","START PROGRAMME","REBOOT UNIT","SW VERSION","EXIT MENU"} 
 };
@@ -66,25 +56,12 @@ const char * menu[3][5] = {
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
 AsyncWebServer server(WEBSERVPORT);
 AsyncEventSource events("/events");
-LiquidCrystal_PCF8574 lcd(LCDI2C); 
-SPRINKLERSYSTEM sprinklersystem(PF575I2C);
+SPRINKLERSYSTEM sprinklersystem(PF575I2C,LCDI2C,LCDROWS,LCDCOLS);
 void startup();                         // Pre-declaration for simplicity
 String sha1(String payloadStr);
 TaskHandle_t mainPollhandle     = NULL;
 TaskHandle_t everyminutehandle  = NULL;
 TaskHandle_t rotaryLoophandle   = NULL;
-
-//////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[clearLcrRow]------Simple LCD Clear row function-------------]
-//////////////////////////////////////////////////////////////////////////
-void clearLcdRow(int row) {
-  lcd.setCursor(0, row);
-  for(int i=0; i< LCDROWS; i++){
-    lcd.print(" ");
-  }
-  lcd.setCursor(0, row);
-}  
-//-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[logger]-------Push log entry to web browser as event--------]
@@ -93,8 +70,7 @@ void logger(String message) {
   char now[120];
   strftime(now, sizeof(now), "%Y-%m-%d %H:%M:%S - ", &timeinfo);
   String str(now);
-  message = now+message;
-Serial.println(message);  
+  message = now+message;  
   events.send(message.c_str(),"message",millis());
  }  
 //-----------------------------------------------------------------------]
@@ -163,9 +139,11 @@ void getCookieUser(char * output, const char * input){
 }
 //-----------------------------------------------------------------------]
 
+//////////////////////////////////////////////////////////////////////////
 // FUNCTION - [readConfigFile] - [Returns key pair values from cfg files-]
+//////////////////////////////////////////////////////////////////////////
 void readConfigFile(char* value, const char* filename, const char* parameter){
-  File file = SD.open(filename);
+  File file = SPIFFS.open(filename,"r");
   if (file){
     DynamicJsonDocument doc(1024);
     deserializeJson(doc, file);
@@ -179,36 +157,40 @@ void readConfigFile(char* value, const char* filename, const char* parameter){
 }
 // ----------------------------------------------------------------------] 
 
+//////////////////////////////////////////////////////////////////////////
 // FUNCTION - [writeConfigFile] - [Adds or updates key pair values in cfg files-]
+//////////////////////////////////////////////////////////////////////////
 void writeConfigFile(const char* value, const char* filename, const char* parameter){ 
-  File file = SD.open(filename);
+  File file = SPIFFS.open(filename,"r");
   if (file){
     DynamicJsonDocument doc(1024);
     deserializeJson(doc, file);
     file.close();
     doc[value] = parameter;
-serializeJson(doc, Serial);
-    File file = SD.open(filename,FILE_WRITE);
+//serializeJson(doc, Serial); //////////////////////////////???????????
+    File file = SPIFFS.open(filename,"w");
     serializeJson(doc, file); 
   } 
   file.close();
 }
 // ----------------------------------------------------------------------------]
 
+//////////////////////////////////////////////////////////////////////////
 // FUNCTION - [loadConfig] - [Returns the current version from the Object------]
+//////////////////////////////////////////////////////////////////////////
 void loadConfig(){  
-  clearLcdRow(3);
-  clearLcdRow(1); 
-  lcd.print("LOADCFG:");
-  clearLcdRow(2);
-  File file = SD.open("/config/system.cnf");
-  lcd.print("/system.cnf");
+  sprinklersystem.lcdClearRow(3);
+  sprinklersystem.lcdClearRow(1);
+  sprinklersystem.lcdClearRow(2);
+  sprinklersystem.lcdPrint("clearrow",0,1,"LOADCFG:");
+  File file = SPIFFS.open("/system.cnf","r");
+  sprinklersystem.lcdPrint("clearrow",0,2,"/system.cnf");
 ///////////////
 //while (file.available()) {
 //  Serial.write(file.read());
 //}
 //file.close();
-//file = SD.open("/config/system.cnf");
+//file = SPIFFS.open("/system.cnf","r");
 /////////////   
   DynamicJsonDocument doc(1024);
   deserializeJson(doc, file);  
@@ -227,6 +209,10 @@ void loadConfig(){
   if (strcmp(valrainio,"")!=0){   
     sprinklersystem.addRainSensor(atoi(valrainio));
   }
+  const char* apiKey = doc["detaapikey"];
+  const char* detaID = doc["detaid"];
+  const char* detaBaseName = doc["detaname"];
+  sprinklersystem.addDetabase(detaID,detaBaseName,apiKey);
   JsonArray arr = doc["zones"].as<JsonArray>();
   for (JsonVariant value : arr) {
     JsonArray thiszone = value;
@@ -248,9 +234,9 @@ void loadConfig(){
       sprinklersystem.setRainsensorStatus(atoi(rainsensstatus));
     }
     else {
-Serial.println("rainsens key undefined");       
+//Serial.println("rainsens key undefined");       
        if (strcmp(valrainio,"")!=0){  
-  Serial.println("rainsens has gpio");       
+//Serial.println("rainsens has gpio");       
 //           sprinklersystem.setRainsensorStatus(1);
 //save value of 1
        } 
@@ -270,7 +256,7 @@ bool isAuth(AsyncWebServerRequest *request) {
     char user[20];
     getCookieUser(user,request->header("Cookie").c_str()); 
     char filepwd[50];
-    readConfigFile(filepwd,"/config/accounts.cnf",user);
+    readConfigFile(filepwd,"/accounts.cnf",user);
     String convFilePwd = filepwd;
     String cookieUser = user;
     String token = sha1(String(cookieUser) + ":" +      
@@ -329,11 +315,11 @@ bool handleFileRead(AsyncWebServerRequest *request, String path) {
       response->addHeader("Content-Encoding", "gzip");
     }
     if(path=="/index.html"){
-      if (!SD.exists("/config/system.cnf")){
+      if (!SPIFFS.exists("/system.cnf")){  
         request->redirect("/configure.html?newcnf=1");
       }
       else {
-        if (!SD.exists("/config/programmes.cnf")){
+        if (!SPIFFS.exists("/programmes.cnf")){ 
           request->redirect("/programme.html?inc=1");
         } 
       }
@@ -382,7 +368,7 @@ void handleLogin(AsyncWebServerRequest *request) {
   }
   else {
     char filepwd[50];
-    readConfigFile(filepwd,"/config/accounts.cnf",user.c_str());
+    readConfigFile(filepwd,"/accounts.cnf",user.c_str());
     String convFilePwd = filepwd;
     if (convFilePwd == request->arg("password")){
       AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
@@ -438,7 +424,7 @@ void handleCfgRoot(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 void handleCheckStatus(AsyncWebServerRequest *request) {
   char result[20];
-  readConfigFile(result,"/config/testresult.cnf","CONN");       
+  readConfigFile(result,"/testresult.cnf","CONN");      
   request->send(200, "text/html", result);
   if (strcmp(result,"SUCCESS") == 0){
     ESP.restart();
@@ -450,22 +436,22 @@ void handleCheckStatus(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleUpdateConfig]-----------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleUpdateConfig(AsyncWebServerRequest *request) {
-  const char *filename = "/config/programmes.cnf";
+  const char *filename = "/programmes.cnf";
   if (request->arg("event") == "progchange") { //programme change
-    if (!SD.exists("/config/programmes.cnf")){
+    if (!SPIFFS.exists("/programmes.cnf")){  
       logger("Error. Programmes not yet configured.");
       request->send(200, "text/html", "{\"s\":\"1\"}");
       return;
     }  
     const char * val = request->arg("value").c_str();   
-    writeConfigFile("program","/config/system.cnf",val);   
+    writeConfigFile("program","/system.cnf",val); 
     sprinklersystem.setProgram(atoi(val));
     request->send(200, "text/html", "{\"s\":\"0\"}");
     return;
   }
   if (request->arg("event") == "rainsensechange") { //rainsensestatus change
-    const char * val = request->arg("value").c_str();   
-    writeConfigFile("rainsensstatus","/config/system.cnf",val);   
+    const char * val = request->arg("value").c_str();    
+    writeConfigFile("rainsensstatus","/system.cnf",val); 
     sprinklersystem.setRainsensorStatus(atoi(val));
     request->send(200, "text/html", "{\"s\":\"0\"}");
     logger("Rain Sensor Status Toggled");
@@ -474,10 +460,10 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
   DynamicJsonDocument doc(1024);
   deserializeJson(doc, request->arg("testval").c_str());
   if (request->arg("filetype") == "cfg") {
-    filename = "/config/system.cnf";
+    filename = "/system.cnf";
     const char* password = doc["pass"];
     if (strcmp(password,"") != 0){
-      writeConfigFile("admin","/config/accounts.cnf",password);
+      writeConfigFile("admin","/accounts.cnf",password);
     }
   if(sprinklersystem.getProgram() > 0){
     char thisProg[3];
@@ -486,7 +472,7 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
   }
     doc.remove("pass");
   }
-  File resultfile = SD.open(filename,FILE_WRITE);
+  File resultfile = SPIFFS.open(filename,"w");
   serializeJson(doc, resultfile);
   resultfile.close();
   request->send(200, "text/html", "{\"s\":\"0\"}");
@@ -505,10 +491,11 @@ void handleUpdateStatus(AsyncWebServerRequest *request) {
   String valve;
   String rsState;
   String rsExist;
-  int i = sprinklersystem.timeToProgStart(&timeinfo);   
+  int i = sprinklersystem.timeToProgStart(&timeinfo); 
   const char * valvePos = sprinklersystem.valvePosition();
   bool rs = sprinklersystem.readRainSensor();
   bool rsEx = sprinklersystem.getHasRainSensor();
+  bool dbActive = sprinklersystem.getDatabaseActive();
   valve = valvePos;
   rsState = rs;
   rsExist = rsEx;
@@ -520,10 +507,8 @@ void handleUpdateStatus(AsyncWebServerRequest *request) {
       info = i;
   } //countdown to start
   else if(sprinklersystem.isTodayComplete(&timeinfo)){state="4";} //completed for today 
-  
   //elsif made it this far but rain delay state = 6
   else if ((sprinklersystem.readRainSensor()==0) && (!sprinklersystem.isInManualProgram()) ){state="6";}
-
   else {
       state="5";
       const char * zoneName = sprinklersystem.getSchedZone(i);
@@ -531,7 +516,7 @@ void handleUpdateStatus(AsyncWebServerRequest *request) {
       zname = zoneName;
       info = zr;
     }//currently running
-  String S = "{\"state\":\""+state+"\",\"info\":\""+info+"\",\"rsstate\":\""+rsState+"\",\"rsexist\":\""+rsExist+"\",\"zone\":\""+zname+"\",\"valve\":\""+valve+"\"}";
+  String S = "{\"state\":\""+state+"\",\"info\":\""+info+"\",\"rsstate\":\""+rsState+"\",\"rsexist\":\""+rsExist+"\", \"dbactive\":\""+dbActive+"\",\"zone\":\""+zname+"\",\"valve\":\""+valve+"\"}";
   request->send(200, "text/html", S);
 }
 //-----------------------------------------------------------------------]
@@ -541,13 +526,13 @@ void handleUpdateStatus(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 void handleGetconf(AsyncWebServerRequest *request) {
   char user[20];
-  const char *filename = "/config/programmes.cnf";
+  const char *filename = "/programmes.cnf";
     if (request->arg("filetype") == "cfg") {
-      filename = "/config/system.cnf";
+      filename = "/system.cnf";
     }
   getCookieUser(user,request->header("Cookie").c_str());
     if (strcmp(user,"admin")==0){   
-      request->send(SD, filename);          
+      request->send(SPIFFS, filename);          
   }
   else {
     request->send(200, "text/html", "{\"e\":\"np\"}");
@@ -671,10 +656,8 @@ void serverRouting() {
       handleNotFound(request); // respond 404 
     }
   });
-//  server.serveStatic("/configuration.json", SPIFFS, "/configuration.json", "no-cache, no-store, must-revalidate");
- server.serveStatic("/configuration.json", SD, "/config/configuration.json", "no-cache, no-store, must-revalidate");
-//  server.serveStatic("/", SPIFFS, "/", "max-age=31536000");
-server.serveStatic("/", SPIFFS, "/", "max-age=31536000");
+  server.serveStatic("/configuration.json", SPIFFS, "/configuration.json", "no-cache, no-store, must-revalidate");
+  server.serveStatic("/", SPIFFS, "/", "max-age=31536000");
 }
 //-----------------------------------------------------------------------]
 
@@ -682,7 +665,7 @@ server.serveStatic("/", SPIFFS, "/", "max-age=31536000");
 //-FUNCTION-[handleWifiConnect]------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleWifiConnect(AsyncWebServerRequest *request) { 
-  File testfile = SD.open("/config/testnetwork.cnf",FILE_WRITE);
+  File testfile = SPIFFS.open("/testnetwork.cnf","w");
   if (!testfile){
       return;  
   }
@@ -717,28 +700,26 @@ void handleWifiList(AsyncWebServerRequest *request) {
 //-FUNCTION-[configNetwork]----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void configNetwork() { 
-  lcd.clear();
-  lcd.print("    \nRubinTech\n");
-  clearLcdRow(1);
-  lcd.print("WIFI: sprinklernet");
-  clearLcdRow(2);
-  lcd.print("Configure at");
-  clearLcdRow(3);
-  lcd.print(deviceName);lcd.print(".local");
+  sprinklersystem.lcdPrint("clearscreen",0,0,"RubinTech");
+  sprinklersystem.lcdPrint("clearscreen",0,1,"WIFI: sprinklernet");
+  sprinklersystem.lcdPrint("clearscreen",0,2,"Configure at");
+  sprinklersystem.lcdClearRow(3);
+  sprinklersystem.lcdPrint("clearscreen",0,3,deviceName);
+  sprinklersystem.lcdPrintConcat(".local");
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(ssid);
   IPAddress myIP = WiFi.softAPIP();
   if (!MDNS.begin(deviceName)){
-  //  Serial.print(F("Error starting mDNS"));
+//  Serial.print(F("Error starting mDNS"));
   }
-WiFi.scanNetworks();
-  if (SD.exists("/config/testnetwork.cnf")){
-    char ssid[50]; 
-    readConfigFile(ssid,"/config/testnetwork.cnf","SSID");         
+  WiFi.scanNetworks();
+  if (SPIFFS.exists("/testnetwork.cnf")){  
+    char ssid[50];  
+    readConfigFile(ssid,"/testnetwork.cnf","SSID");       
     char key[50];
-    readConfigFile(key,"/config/testnetwork.cnf","PASSWORD");
-    if(SD.exists("/config/testresult.cnf")){SD.remove("/config/testresult.cnf");}
-    File resultfile = SD.open("/config/testresult.cnf",FILE_WRITE);
+    readConfigFile(key,"/testnetwork.cnf","PASSWORD");
+    if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
+    File resultfile = SPIFFS.open("/testresult.cnf","w");
     if (!resultfile){
       return;  
     }    
@@ -749,7 +730,7 @@ WiFi.scanNetworks();
       i++;
       if (i==15){
         delay(100);
-        SD.remove("/config/testnetwork.cnf");
+        SPIFFS.remove("/testnetwork.cnf");
         resultfile.println("{\"CONN\":\"FAIL\"}");
         resultfile.close();            
         startup();
@@ -758,7 +739,7 @@ WiFi.scanNetworks();
     }
     resultfile.println("{\"CONN\":\"SUCCESS\"}");
     resultfile.close();
-    SD.rename("/config/testnetwork.cnf", "/config/network.cnf");
+    SPIFFS.rename("/testnetwork.cnf", "/network.cnf");
   }
   server.on("/", HTTP_GET , handleCfgRoot);
 }
@@ -769,56 +750,56 @@ WiFi.scanNetworks();
 //////////////////////////////////////////////////////////////////////////
 void loadNetwork() {
     char ssid[50]; 
-    readConfigFile(ssid,"/config/network.cnf","SSID");
-    clearLcdRow(2);
-    lcd.print("Connecting");
-    clearLcdRow(3);
+    readConfigFile(ssid,"/network.cnf","SSID");  
+    sprinklersystem.lcdPrint("clearrow",0,2,"Connecting");
+    sprinklersystem.lcdClearRow(3);
     char key[50];
-    readConfigFile(key,"/config/network.cnf","PASSWORD");  
-    if(SD.exists("/config/testresult.cnf")){SD.remove("/config/testresult.cnf");}
+    readConfigFile(key,"/network.cnf","PASSWORD");  
+    if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
     WiFi.begin(ssid,key);
     int i =0;
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
-      lcd.print(".");
+      sprinklersystem.lcdPrint("none",i,3,".");
       i++;
       if (i==15){
-        clearLcdRow(2);
-        lcd.print("Connect Fail");
-        clearLcdRow(3);
-        lcd.print("Restart....");
-        delay(100);     
+        sprinklersystem.lcdPrint("clearrow",0,2,"Connect Fail");
+        sprinklersystem.lcdPrint("clearrow",0,3,"Restart....");
+        delay(100);    
         startup();        
     }
   }
-  clearLcdRow(3);
   if (!MDNS.begin(deviceName)){
-    lcd.print("mDNS: Error Starting.");
+    sprinklersystem.lcdPrint("clearrow",0,3,"mDNS: Error Starting.");
   }
   else {
-    lcd.print(deviceName); lcd.print(".local");
+    sprinklersystem.lcdPrint("clearrow",0,3,deviceName);
+    sprinklersystem.lcdPrintConcat(".local");
   }
-  clearLcdRow(2);
-  lcd.print(WiFi.localIP());
-  delay(1000);
-  clearLcdRow(1);
-  lcd.print("NTP: ");
+  IPAddress ip = WiFi.localIP();
+  char * ourIP = new char[20]();
+  sprintf(ourIP, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  sprinklersystem.lcdPrint("clearrow",0,2,ourIP);
+  delay(1000);  
+  sprinklersystem.lcdPrint("clearrow",0,1,"NTP: ");
   configTime(0, 0, ntpServer);
   if (getLocalTime(&timeinfo)){
-    lcd.print("OK"); 
+    sprinklersystem.lcdPrint("none",5,1,"OK");
   }
   else {
-    lcd.print("FAILED");
+    sprinklersystem.lcdPrint("none",5,1,"FAILED");
     delay(1000);
     ESP.restart();
   }
 }
 //-----------------------------------------------------------------------]
 
-// FUNCTION - [acctMgr] - [Initializes and handles user accounts---------------]
+/////////////////////////////////////////////////////////////////////////
+// FUNCTION - [acctMgr] - [Initializes and handles user accounts--------] lib
+/////////////////////////////////////////////////////////////////////////
 void acctMgr(const char* action,const char* account,const char* val){
- if(!SD.exists("/config/accounts.cnf")){
-    File accountfile = SD.open("/config/accounts.cnf","w");
+ if(!SPIFFS.exists("/accounts.cnf")){ 
+    File accountfile = SPIFFS.open("/accounts.cnf","w");
     if (!accountfile){
       return;  
     }
@@ -826,39 +807,26 @@ void acctMgr(const char* action,const char* account,const char* val){
       accountfile.println("{\"admin\":\"password\"}"); 
       accountfile.close();
     } 
- //}   
- //if(!SPIFFS.exists("/perms.cnf")){
- //   File permfile = SPIFFS.open("/perms.cnf","w");
- //   if (!permfile){
- //     Serial.print("wri err!");
- //     return;  
- //   }
- //   if ((action == "inspect")&&(account =="admin")&&(val=="0")){
- //     permfile.println("{\"admin\":\"admin\"}"); 
- //     permfile.close();
- //   }  
-// }
-  //  Serial.println("USERS:   Created account file with default admin");
     return;
  }
- // Serial.println("USERS:   Account file exists");
 }
-// ----------------------------------------------------------------------------]
+// ---------------------------------------------------------------------]
 
 /////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[displayheader]---------------------------------------------]
+//-FUNCTION-[displayheader]---------------------------------------------] lib?
 /////////////////////////////////////////////////////////////////////////
 void displayHeader() {
+//  if (!sprinklersystem.lcdlock){
   lastTimepoll = millis();
   getLocalTime(&timeinfo);
+  char ourtime[20];
+  strftime(ourtime, sizeof ourtime, "%A  %H:%M", &timeinfo); 
   if (!displayLock){
-    lcd.begin(LCDROWS, LCDCOLS);
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print(&timeinfo, "%A  %H:%M");
-    lcd.setCursor(0,1);
-    lcd.print("Program ");
+    sleep(1);
+    sprinklersystem.lcdPrint("init",0,0,ourtime);
+    sprinklersystem.lcdPrint("clearrow",0,1,"Program");
   }
+//  }
 }
 //-----------------------------------------------------------------------]
 
@@ -866,15 +834,26 @@ void displayHeader() {
 //-FUNCTION-[displayMeter]-----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void displayMeter() {
-  if (!displayLock){
+//  if (!displayLock){
+  if (!sprinklersystem.lcdlock){
     if(sprinklersystem.isActive()){
       char mtype = sprinklersystem.getMeasureType();
       double val = sprinklersystem.readConsumption(); 
-      delay(350);
-      lcd.setCursor(0,3);
-      lcd.print(val);
-      lcd.print(mtype);
-      lcd.setCursor(0,3);
+      sleep(1);
+char * numer = new char[20]();
+char *type = new char[2]();
+//strncat()
+ // sprintf(numer, "0.3f", val);
+sprinklersystem.lcdPrint("clearrow",0,3,"numer");
+
+    //  sprinklersystem.lcdPrint("clearrow",0,3,val);
+      //lcd.setCursor(0,3);
+      //lcd.print(val);
+      //lcd.print(mtype);
+Serial.println(mtype);
+ Serial.println(numer);     
+      sprinklersystem.lcdPrintConcat("mtype");
+      //lcd.setCursor(0,3);
       char message[30];
       sprintf(message, "%g%c", val, mtype);
       events.send(message,"meter",millis());
@@ -897,22 +876,6 @@ void closeZones() {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[displaySwVersion--]-----------------------------------------]
-//////////////////////////////////////////////////////////////////////////
-void displaySwVersion(){
-  lcd.clear();
-  lcd.print("    \nRubinTech\n");
-  lcd.setCursor(0,1); 
-  lcd.print("   *ESPIRRIGATE*");
-  lcd.setCursor(0,2);
-  lcd.print(" JORDAN RUBIN 2022");
-  lcd.setCursor(0,3);
-  lcd.print("VER. ");
-  lcd.print(version);
-  delay(8000);
-}
-
-//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[checkMenu]--------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 bool checkMenu(){
@@ -925,7 +888,9 @@ bool checkMenu(){
       selectlevel=-1;
     }
   if (strcmp(selectedProgram,"BACK")==0){
-    selectlevel=-1;
+    selectlevel=1;
+    menulevel =0;
+    programMenu = -1;
     return 0;
   }
     displayLock = false;
@@ -944,7 +909,7 @@ bool checkMenu(){
     ESP.restart();
   }
   if (strcmp(menu[menulevel][selectlevel],"SW VERSION")==0){
-    displaySwVersion();
+    sprinklersystem.lcdDisplaySwVersion(version);
     displayLock = false;
     menulevel =0;
     selectlevel =0;
@@ -987,14 +952,13 @@ void displayEachProgram(){
   int lastOption = sprinklersystem.getZoneCount();
   strncpy(nameList[lastOption],"BACK",20);
   if (programMenu >= lastOption) {programMenu = lastOption;}
-  clearLcdRow(2);
   strncpy(selectedProgram,nameList[programMenu],20);
-  lcd.print(nameList[programMenu]);
+  sprinklersystem.lcdPrint("clearrow",0,2,nameList[programMenu]);
 }
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[displayMeter]-----------------------------------------------]
+//-FUNCTION-[loadMenu]---------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void loadMenu(int level){
   if (level < 0){level=0;}
@@ -1002,53 +966,50 @@ void loadMenu(int level){
     displayEachProgram();
     return;
   }
-  clearLcdRow(2);
   if (selectlevel>4){selectlevel=4;}
   if (selectlevel<0){selectlevel=0;}   //!!!!! change this to appropriate max value
-  lcd.print(menu[level][selectlevel]);
+  sprinklersystem.lcdPrint("clearrow",0,2,menu[level][selectlevel]);
 } 
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[displayCountdown]-------------------------------------------]
+//-FUNCTION-[displayCountdown]-------------------------------------------] lib?
 //////////////////////////////////////////////////////////////////////////
 void displayCountdown(int i) {
   if (!displayLock){  
-    lcd.setCursor(0,2);
-    lcd.print("Begins in ");
-    lcd.setCursor(0,3);
+    sprinklersystem.lcdPrint("clearrow",0,2,"Begins in ");
     if (i > 60){
       int hours = i/60;
       int minutes = i%60;
-      lcd.print(hours);
-      lcd.print("HR ");
-      lcd.print(minutes);
+      sprinklersystem.lcdPrint("clearrow",0,3,hours);
+      sprinklersystem.lcdPrintConcat("HR ");
+      sprinklersystem.lcdPrintConcat(minutes);
     }
     else{
-      lcd.print(i);
+      sprinklersystem.lcdPrint("clearrow",0,3,i);
     }
-    lcd.print(" minutes");
+    sprinklersystem.lcdPrintConcat(" minutes");
   }
 }
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[displayProgram]---------------------------------------------]
+//-FUNCTION-[displayProgram]---------------------------------------------] displaylock in lib
 //////////////////////////////////////////////////////////////////////////
 void displayProgram() {
   int testprog = sprinklersystem.getProgram();
   if (!displayLock){
-      if(testprog==1){lcd.print("[A] ");}
-      if(testprog==2){lcd.print("[B] ");}
-      if(testprog==3){lcd.print("[C] ");}
-      if(testprog==4){lcd.print("OFF");}
+      if(testprog==1){sprinklersystem.lcdPrint("none",8,1,"[A] ");}
+      if(testprog==2){sprinklersystem.lcdPrint("none",8,1,"[B] ");}
+      if(testprog==3){sprinklersystem.lcdPrint("none",8,1,"[C] ");}
+      if(testprog==4){sprinklersystem.lcdPrint("none",8,1,"[OFF]");}
   }
       displayprogram = testprog;
 }
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[handleManualsched]------------------------------------------]
+//-FUNCTION-[handleManualsched]------------------------------------------] lib?
 //////////////////////////////////////////////////////////////////////////
 void handleManualsched(){
   getLocalTime(&timeinfo);
@@ -1063,19 +1024,17 @@ void handleManualsched(){
 void checkPower(){
   Serial.println(digitalRead(POWER_MONITOR_PIN));
   if (digitalRead(POWER_MONITOR_PIN) == LOW){
-    Serial.println("Power loss dettected....");
-    Serial.println("Writing meter to SD.");
+    Serial.println("Power loss detected....");
+    Serial.println("Writing meter to Filesystem.");
     sprinklersystem.updateMeter();
     Serial.println("Disable LCD");
-    lcd.setBacklight(0);
-    lcd.noDisplay();
-    String message = "Power loss detected, writing to SD and shifting to low power mode.";
+    sprinklersystem.lcdPower(0);
+    String message = "Power loss detected, writing to FS and shifting to low power mode.";
     logger(message);
   }
   else{
     Serial.println("Power restored....");
-    lcd.setBacklight(10);
-    lcd.display();
+    sprinklersystem.lcdPower(1);
     String message = "Power restored";
     logger(message);
   }
@@ -1133,8 +1092,7 @@ void everyMinute(void * parameter){
       }
       if(sprinklersystem.isCanceled()){ //HANDLE CANCELED        
         if (!displayLock){
-          lcd.setCursor(0,3);
-          lcd.print("      CANCELED");
+          sprinklersystem.lcdPrint("clearrow",7,3,"CANCELED");
         }
         if(sprinklersystem.isActive()){          
           closeZones();
@@ -1151,8 +1109,7 @@ void everyMinute(void * parameter){
         }
         sprinklersystem.setValve("CLOSED"); 
         if (!displayLock){
-          lcd.setCursor(0,3);
-          lcd.print("        IDLE");
+          sprinklersystem.lcdPrint("clearrow",8,3,"IDLE");
         }
       }
       else {
@@ -1167,10 +1124,8 @@ void everyMinute(void * parameter){
               sprinklersystem.cancelManual();
             }           
             if (!displayLock){
-              lcd.setCursor(0,2);
-              lcd.print("Today's Schedule");
-              lcd.setCursor(0,3);
-              lcd.print("has completed..");
+              sprinklersystem.lcdPrint("clearrow",0,2,"Today's Schedule");
+              sprinklersystem.lcdPrint("clearrow",0,3,"has completed..");
             }
             if(sprinklersystem.isActive()){
               closeZones();
@@ -1181,8 +1136,7 @@ void everyMinute(void * parameter){
               //check rain sensor
               if ((sprinklersystem.getHasRainSensor()) && (sprinklersystem.getRainSensor())){     
                 if ((sprinklersystem.readRainSensor() ==0) && (!sprinklersystem.isInManualProgram())){  //engaged AND NOT MANUAL MODE
-                  lcd.setCursor(0,2);
-                  lcd.print("   --Rain Delay--");
+                  sprinklersystem.lcdPrint("clearrow",3,2,"--Rain Delay--");
                   if(sprinklersystem.isActive()){
                     closeZones();
                   }
@@ -1191,9 +1145,11 @@ void everyMinute(void * parameter){
               }
               int zr = sprinklersystem.getZoneRemaining();
               //PLACEHOLDER TO KICKOFF THE RUN TASK AND HALT THIS ONE
-              lcd.print(zr); lcd.print("min");
-              lcd.setCursor(0,2);
-              lcd.print(zoneName);
+              char thiszr[4];
+              itoa(zr,thiszr,10);
+              sprinklersystem.lcdPrint("clearrow",12,2,thiszr);
+              sprinklersystem.lcdPrintConcat("min");
+              sprinklersystem.lcdPrint("clearrow",0,2,zoneName);
             }
             startZone(zoneName); // All the functions for zone open
             displayMeter();
@@ -1221,6 +1177,14 @@ void rotaryLoop(void * parameter){
   //UBaseType_t uxHighWaterMark;
   for(;;){
 	  if (rotaryEncoder.encoderChanged()){
+Serial.print("ENCODER- ");
+Serial.print("PM:"); Serial.print(programMenu);
+Serial.print(" SL:"); Serial.print(selectlevel);
+Serial.print(" ML:"); Serial.println(menulevel);
+int txt = rotaryEncoder.readEncoder();
+Serial.print(" VAL:"); Serial.println(txt);
+
+
       if (displayLock){
         int encval = rotaryEncoder.readEncoder();
         if (encval < lastEncval){
@@ -1243,10 +1207,7 @@ void rotaryLoop(void * parameter){
       if (selectlevel < 0){selectlevel =0;}
       if (!displayLock){
         displayLock=true;
-        lcd.begin(LCDROWS, LCDCOLS);
-        lcd.clear();
-        lcd.setCursor(0,0);
-        lcd.print("       *MENU*");
+        sprinklersystem.lcdPrint("init",7,0,"*MENU*");
       } 
       loadMenu(menulevel);        
 	  }
@@ -1261,12 +1222,12 @@ void rotaryLoop(void * parameter){
 //////////////////////////////////////////////////////////////////////////
 void startup(){
   acctMgr("inspect","admin","0");
-  if (SD.exists("/config/network.cnf")){
-     lcd.print("NETWK: Loading");
+  if (SPIFFS.exists("/network.cnf")){  
+     sprinklersystem.lcdPrint("clearrow",0,3,"NETWK: Loading");
      loadNetwork();
   }
   else {
-     lcd.print("NETWK: No Config");   
+    sprinklersystem.lcdPrint("clearrow",0,3,"NETWK: No Config");   
      configNetwork();    
   }
   server.on("/getWifiList",  HTTP_GET, handleWifiList);
@@ -1284,15 +1245,14 @@ void startup(){
   server.addHandler(&events);
   server.begin();
   delay(2000);
-  if (SD.exists("/config/system.cnf")){
+  if (SPIFFS.exists("/system.cnf")){  
     loadConfig();
     delay(500);
-    clearLcdRow(3);
-    if (!SD.exists("/config/programmes.cnf")){
-      lcd.print("CONFIG INCOMPLETE");
+    if (!SPIFFS.exists("/programmes.cnf")){  
+      sprinklersystem.lcdPrint("clearow",0,3,"CONFIG INCOMPLETE");
     } 
     else {
-      lcd.print("PROCESS COMPLETE");    
+      sprinklersystem.lcdPrint("clearrow",0,3,"PROCESS COMPLETE");   
       delay(1000);
       xTaskCreatePinnedToCore(mainPoll,"mainPolltask",1600,NULL,1,&mainPollhandle,1);     //132
       xTaskCreatePinnedToCore(everyMinute,"everyminutetask",2600,NULL,1,&everyminutehandle,1); //???
@@ -1311,21 +1271,21 @@ void facdefMonitor(void * parameter){
     double now = millis();
     while (digitalRead(FACDEFPIN) == LOW){
       if ((millis()-now) >= FACDEFDELAY){ 
-        clearLcdRow(1);
-        clearLcdRow(3);
-        clearLcdRow(2);  
-        lcd.print("Defaulting unit!");
-        SD.remove("/config/network.cnf");
-        SD.remove("/config/testresult.cnf");
-        SD.remove("/config/testnetwork.cnf");
-        SD.remove("/config/configuration.json");
-        SD.remove("/config/accounts.cnf");
-        SD.remove("/config/system.cnf");
-        SD.remove("/config/programmes.cnf");
-        clearLcdRow(1);
-        clearLcdRow(2);
-        clearLcdRow(3);
-        lcd.print("DEFAULTED!!!!");
+        sprinklersystem.lcdClearRow(1);
+        sprinklersystem.lcdClearRow(3);
+        sprinklersystem.lcdClearRow(2); 
+        sprinklersystem.lcdPrint("clearrow",0,2,"Defaulting unit!");
+        SPIFFS.remove("/network.cnf");
+        SPIFFS.remove("/testresult.cnf");
+        SPIFFS.remove("/testnetwork.cnf");
+        SPIFFS.remove("/configuration.json");
+        SPIFFS.remove("/accounts.cnf");
+        SPIFFS.remove("/system.cnf");
+        SPIFFS.remove("/programmes.cnf");
+        sprinklersystem.lcdClearRow(1);
+        sprinklersystem.lcdClearRow(2);
+        sprinklersystem.lcdClearRow(3);     
+        sprinklersystem.lcdPrint("clearrow",0,3,"DEFAULTED!!!!");
         delay(2000);
         ESP.restart();
       }
@@ -1354,86 +1314,28 @@ void IRAM_ATTR handlePowerFailureISR() {
 }
 //-----------------------------------------------------------------------]
 
-
-
-/*
-void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
-  Serial.printf("Listing directory: %s\n", dirname);
-
-  File root = fs.open(dirname);
-  if(!root){
-    Serial.println("Failed to open directory");
-    return;
-  }
-  if(!root.isDirectory()){
-    Serial.println("Not a directory");
-    return;
-  }
-
-  File file = root.openNextFile();
-  while(file){
-    if(file.isDirectory()){
-      Serial.print("  DIR : ");
-      Serial.println(file.name());
-      if(levels){
-        listDir(fs, file.name(), levels -1);
-      }
-    } else {
-      Serial.print("  FILE: ");
-      Serial.print(file.name());
-      Serial.print("  SIZE: ");
-      Serial.println(file.size());
-
-
-  while(file.available()){
-    Serial.write(file.read());
-  }
-
-    }
-     file = root.openNextFile();
-  }
-}
-*/
-
 //////////////////////////////////////////////////////////////////////////
 //-SYSTEM-[setup]--------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void setup() {
-  int error;
   Serial.begin(115200);
   TaskHandle_t facdefhandle = NULL;
   pinMode(FACDEFPIN, INPUT_PULLUP);
   pinMode(POWER_MONITOR_PIN,INPUT_PULLDOWN);
-  lcd.begin(LCDROWS, LCDCOLS);
-  sprinklersystem.begin(0x20);
-  rotaryEncoder.setBoundaries(0,10,false);
+  sprinklersystem.begin();
+  rotaryEncoder.setBoundaries(0,1000,false);
   rotaryEncoder.begin();
   rotaryEncoder.disableAcceleration();
 	rotaryEncoder.setup(readEncoderISR);
   xTaskCreatePinnedToCore(facdefMonitor,"facdeftask",2300,NULL,1,&facdefhandle,1);
   attachInterrupt(POWER_MONITOR_PIN, handlePowerFailureISR, CHANGE);
-  lcd.home();
-  lcd.clear();
-  lcd.setBacklight(10);
-  lcd.print("    *RubinTech*");
-  lcd.setCursor(0, 1);
-  lcd.print("  Boot  Framework");
-  lcd.setCursor(0, 2);
-  sprinklersystem.startSpiffFs();
-  if(!sprinklersystem.startSDfs()){  
-    lcd.print("SDCARD: Mount err."); 
-    return;
-  } 
-  else {lcd.print("SDCARD:  Mounted");}
-  //SD.remove("/config/network.cnf");
-  lcd.setCursor(0, 3);
   startup();
 }
 
 //////////////////////////////////////////////////////////////////////////
 //-SYSTEM-[loop]--------------------STAYS EMPTY--------------------------]
 //////////////////////////////////////////////////////////////////////////
-void loop() { }
+void loop() {}
 //-----------------------------------------------------------------------]
 
 /* STORAGE

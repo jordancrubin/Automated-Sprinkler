@@ -7,17 +7,20 @@
 */
 #include <Arduino.h>
 #include <Sprinkler.h>
-#include <SD.h>
-#include <FS.h>
+#include <SPIFFS.h>
 #include <Wire.h>
 
 //MAIN CONSTRUCTOR ------------------------------------------------------------]
-//SPRINKLERSYSTEM SPRINKLERSYSTEM(int statusled)
-SPRINKLERSYSTEM::SPRINKLERSYSTEM(int pf575addr){
+//SPRINKLERSYSTEM SPRINKLERSYSTEM(int pf575addr, int lcdi2cval, int lcdrowsval, int lcdcolsval)
+SPRINKLERSYSTEM::SPRINKLERSYSTEM(int pf575addr, int lcdi2cval, int lcdrowsval, int lcdcolsval){
   this->pf575address= pf575addr;
   this->active=false;
   this->consumption = 0;
   this->enabled = " ";
+  this->lcdaddress = lcdi2cval;
+  this->lcdrows = lcdrowsval;
+  this->lcdcols = lcdcolsval;
+  WiFiClientSecure client;
 }
 // ----------------------------------------------------------------------------]
 
@@ -37,11 +40,25 @@ void SPRINKLERSYSTEM::activateSolenoid(int solenoidNum){
   }
   int mask   = 0B0000000000000001;
   int offVal = 0B1111111111111111;
-  mask = mask << solenoidNum-1;
+  mask = mask << (solenoidNum-1);
   int result = offVal ^ mask;
 Serial.println(result, BIN);
   this->writePf575(result); 
 }
+// ----------------------------------------------------------------------------]
+
+// FUNCTION - [addDetabase] - [Adds Detabase connection to the object----------]
+bool SPRINKLERSYSTEM::addDetabase(const char* id, const char* name, const char* apikey){
+  detaObj = new DetaBaseObject(this->client, id, name, apikey, true);
+  this->hasDetabase = true;
+  const char * testid = detaObj->getDetaID();
+  if (strcmp(testid,id)==0){
+    this->detabaseconnect = true;
+      printResult(detaObj->query("{\"query\":[{\"age?lt\": 10}]}"));
+    return 1;
+  }
+  return 0;
+ }
 // ----------------------------------------------------------------------------]
 
 // FUNCTION - [addMeter] - [Adds a water meter to the Object-------------------]
@@ -82,8 +99,7 @@ const char* SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
       if (myIndex >=0 && myIndex <=maxZones+1) {
           return "gpioinuse";
       }    
-     storedZones[i] = new Zone(gpio,zonename);     
-//      digitalWrite(storedZones[i]->gpio,HIGH); //old code
+      storedZones[i] = new Zone(gpio,zonename);     
       zoneCount++;
       break;
     }
@@ -93,9 +109,24 @@ const char* SPRINKLERSYSTEM::addZone(int gpio, char* zonename){
 // ----------------------------------------------------------------------------]
 
 // FUNCTION - [begin] - [clears the enabled flagfrom the Object----------------]
-void SPRINKLERSYSTEM::begin(int ic2port){
+void SPRINKLERSYSTEM::begin(){
   Wire.begin();
   this->writePf575(0B1111111111111111); //Set all off
+  lcd = new LiquidCrystal_PCF8574(this->lcdaddress);
+  lcd->begin(this->lcdrows,this->lcdcols);
+  lcd->home();
+  lcd->clear();
+  lcd->setBacklight(10);
+  lcd->print("    *RubinTech*");
+  lcd->setCursor(0, 1);
+  lcd->print("  Boot  Framework");
+  lcd->setCursor(0, 2);
+    if(!startSpiffFs()){
+    lcd->print("SPIFFS: Mount err."); 
+    return;
+  } 
+  else {lcd->print("SPIFFS:  Mounted");}
+  lcd->setCursor(0, 3); 
 }
 // ----------------------------------------------------------------------------] 
 
@@ -110,17 +141,22 @@ void SPRINKLERSYSTEM::clearEnabled(){
 void SPRINKLERSYSTEM::closeZone(const char* name){
   int myIndex = this->getIndex(name);
   if (myIndex >=0 && myIndex <=maxZones+1) {
-  //  digitalWrite(storedZones[myIndex]->gpio,HIGH); //old code
-  this->activateSolenoid(-1);
+    this->activateSolenoid(-1);
     storedZones[myIndex]->open = false;
   }
 }
 // ----------------------------------------------------------------------------]
 
+// FUNCTION - [getDatabaseActive] - [returns connection state of Database------]
+bool SPRINKLERSYSTEM::getDatabaseActive(){
+  return this->detabaseconnect;
+}
+// ----------------------------------------------------------------------------] 
+
 // FUNCTION - [getDescription] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx---------]
 const char * SPRINKLERSYSTEM::getDescription(const char* name){
   int myIndex = this->getIndex(name); 
-    return storedZones[myIndex]->description;
+  return storedZones[myIndex]->description;
 }
 // ----------------------------------------------------------------------------]
 
@@ -166,26 +202,26 @@ int SPRINKLERSYSTEM::getProgram(){
 }
 // ----------------------------------------------------------------------------] 
 
-// FUNCTION - [getRainSensor] - [Returns OP state of rain sensor ---------------]
+// FUNCTION - [getRainSensor] - [Returns OP state of rain sensor --------------]
 bool SPRINKLERSYSTEM::getRainSensor(){
   return this->rainsensorStatus; 
 }
 // ----------------------------------------------------------------------------] 
 
-// FUNCTION - [getHasRainSensor] - [Returns existance rain sensor --------------]
+// FUNCTION - [getHasRainSensor] - [Returns existance rain sensor -------------]
 bool SPRINKLERSYSTEM::getHasRainSensor(){
   return this->hasRainsensor; 
 }
 // ----------------------------------------------------------------------------] 
 
-// FUNCTION - [readRainSensor] - [Returns the rain sensor state ----------------] CONDENSE THIS!!!!!!
+// FUNCTION - [readRainSensor] - [Returns the rain sensor state ---------------] CONDENSE THIS!!!!!!
 bool SPRINKLERSYSTEM::readRainSensor(){
   bool state = digitalRead(this->rainSensorGpio);
   return state; 
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [getSchedZone] - [Returns zone that should be running right now---]
+// FUNCTION - [getSchedZone] - [Returns zone that should be running right now--]
 const char * SPRINKLERSYSTEM::getSchedZone(int elapsed){
   for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
     if(storedZones[i]){
@@ -197,15 +233,15 @@ const char * SPRINKLERSYSTEM::getSchedZone(int elapsed){
   }
   return "-1";
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
-// FUNCTION - [getZoneCount] - [Returns the number of active zones--------------]
+// FUNCTION - [getZoneCount] - [Returns the number of active zones-------------]
 int SPRINKLERSYSTEM::getZoneCount(){
   return this->zoneCount;
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
-// FUNCTION - [getZoneNames] - [Returns the names of zones in an arrayref-------]
+// FUNCTION - [getZoneNames] - [Returns the names of zones in an arrayref------]
 void SPRINKLERSYSTEM::getZoneNames(char (& Array)[12][20]){
   for (int i=0; i<sizeof storedZones/sizeof storedZones[0]; i++) {
     if(storedZones[i]){
@@ -213,13 +249,107 @@ void SPRINKLERSYSTEM::getZoneNames(char (& Array)[12][20]){
     }
   }
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
-// FUNCTION - [getZoneRemaining] - [Returns the remaining min of current zone---]
+// FUNCTION - [getZoneRemaining] - [Returns the remaining min of current zone--]
 int SPRINKLERSYSTEM::getZoneRemaining(){
   return this->zoneRemaining;
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
+// FUNCTION - [lcdClearRow] - [Blanks entire row of LCD screen-----------------]
+void SPRINKLERSYSTEM::lcdClearRow(int row){
+  while (this->lcdlock){delay (lcdLockDelay);}
+  lcd->setCursor(0, row);
+  for(int i=0; i< this->lcdrows; i++){
+    lcd->print(" ");
+  }
+  lcd->setCursor(0, row);
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [lcdDisplaySwVersion] - [Displays software info to LCD-----------]
+void SPRINKLERSYSTEM::lcdDisplaySwVersion(const char * version){
+  this->lcdPrint("clearrow",4,0,"-RubinTech-");
+  this->lcdPrint("clearrow",3,1,"*ESPIRRIGATE*");
+  this->lcdPrint("clearrow",1,2,"JORDAN RUBIN 2022");
+  this->lcdPrint("clearrow",0,3,"VER. ");
+  this->lcdPrintConcat(version);
+  delay(8000);
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [lcdPower] - [Turns the LCD screen ON or OFF---------------------]
+void SPRINKLERSYSTEM::lcdPower(bool state){
+  if (state ==0){
+    lcd->noDisplay();
+  }
+  else {
+    lcd->setBacklight(10);
+    lcd->display();
+  }
+}
+// ----------------------------------------------------------------------------] 
+// FUNCTION - [lcdPrint] - [prints text to the LCD screen----------------------]
+void SPRINKLERSYSTEM::lcdPrint(const char * option, int col, int row, const char* text){
+  while (this->lcdlock){delay (lcdLockDelay);}
+  this->lcdlock = true;
+  if(strcmp(option,"clearrow")==0){
+    this->lcdlock = false;
+    lcdClearRow(row);
+    this->lcdlock = true;
+  }
+  if(strcmp(option,"clearscreen")==0){lcd->clear();}
+  if(strcmp(option,"init")==0){
+    lcd->begin(this->lcdrows,this->lcdcols);
+    lcd->clear();
+    lcd->setCursor(0, 0);
+  }
+  if(strcmp(option,"concat")!=0){lcd->setCursor(col, row);}
+  lcd->print(text);
+  this->lcdlock = false;
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [lcdPrint] - [prints text to the LCD screen----------------------]
+void SPRINKLERSYSTEM::lcdPrint(const char * option, int col, int row, int num){
+  while (this->lcdlock){delay (lcdLockDelay);}
+  this->lcdlock = true;
+  if(strcmp(option,"clearrow")==0){
+    this->lcdlock = false;
+    lcdClearRow(row);
+    this->lcdlock = true;
+  }
+   if(strcmp(option,"clearscreen")==0){lcd->clear();}
+   if(strcmp(option,"init")==0){
+    lcd->begin(this->lcdrows,this->lcdcols);
+    lcd->clear();
+    lcd->setCursor(0, 0);
+  }
+  if(strcmp(option,"concat")!=0){lcd->setCursor(col, row);}
+  lcd->print(num);
+  this->lcdlock = false;
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [lcdPrint] - [continue of print text to the LCD screen from last-]
+void SPRINKLERSYSTEM::lcdPrintConcat(const char* text){
+  while (this->lcdlock){delay (lcdLockDelay);}
+  this->lcdlock = true;
+  lcd->print(text);
+  delay(50);
+  this->lcdlock = false;
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [lcdPrint] - [continue of print text to the LCD screen from last-]
+void SPRINKLERSYSTEM::lcdPrintConcat(int num){
+  while (this->lcdlock){delay (50);}
+  this->lcdlock = true;
+  lcd->print(num);
+  delay(50);
+  this->lcdlock = false;
+}
+// ----------------------------------------------------------------------------] 
 
 // FUNCTION - [removeZone] - [Returns the current version from the Object------]
 bool SPRINKLERSYSTEM::isActive(){
@@ -254,7 +384,7 @@ void SPRINKLERSYSTEM::isInManualProgram(bool val){
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [isSchedForToday] - [Returns if set to run today------------------]
+// FUNCTION - [isSchedForToday] - [Returns if set to run today-----------------]
 bool SPRINKLERSYSTEM::isSchedForToday(tm * day){
   if (inManual){return 1;}
   int today = day->tm_wday;
@@ -262,9 +392,9 @@ bool SPRINKLERSYSTEM::isSchedForToday(tm * day){
   else {today--;}
   return this->days[today];
 }
- // ----------------------------------------------------------------------------] 
+// ---------------------------------------------------------------------------] 
 
-// FUNCTION - [isTodayComplete] - [Returns if todays prog has completed or not--]
+// FUNCTION - [isTodayComplete] - [Returns if todays prog has completed or not-]
 bool SPRINKLERSYSTEM::isTodayComplete(tm * time){
   int i = this->timeToProgStart(time); 
   const char *  zoneName = this->getSchedZone(i);
@@ -273,7 +403,7 @@ bool SPRINKLERSYSTEM::isTodayComplete(tm * time){
   }
   return 0;
 }
-// -----------------------------------------------------------------------------]
+// ----------------------------------------------------------------------------]
 
 // FUNCTION - [meterMoved] - [Returns the current version from the Object------]
 bool SPRINKLERSYSTEM::meterMoved(void){
@@ -281,16 +411,14 @@ bool SPRINKLERSYSTEM::meterMoved(void){
   status = flowmeter->updated();
   return status;
 }
- // ---------------------------------------------------------------------------] 
+// ---------------------------------------------------------------------------] 
 
-// FUNCTION - [offsetManual] - [Returns the current version from the Object--------]
+// FUNCTION - [offsetManual] - [Returns the current version from the Object----]
 void SPRINKLERSYSTEM::offsetManual(const char* name, tm * time){
-  //if (!inManual || manualZoneChange){
     if (manualZoneChange){
     if (!inManual){
       backupStartTime = startTime;
     }
-   // inManual = true;
     manualZoneChange = false;
     startTime = time->tm_hour * 100 + time->tm_min;
     int myIndex = this->getIndex(name);
@@ -303,46 +431,45 @@ void SPRINKLERSYSTEM::offsetManual(const char* name, tm * time){
 } 
 // ---------------------------------------------------------------------------]
 
-// FUNCTION - [cancelManual] - [Returns from Manuak mode to Automatic--------]
+// FUNCTION - [cancelManual] - [Returns from Manuak mode to Automatic---------]
 void SPRINKLERSYSTEM::cancelManual(){
   inManual = false;
   startTime = backupStartTime;
 }
 // ---------------------------------------------------------------------------]
 
-// FUNCTION - [openZone] - [Returns the current version from the Object--------]
+// FUNCTION - [openZone] - [Returns the current version from the Object-------]
 void SPRINKLERSYSTEM::openZone(const char* name){
   int myIndex = this->getIndex(name);
   if (myIndex >=0 && myIndex <=maxZones+1) {
     this->setConsumption();
     this->activateSolenoid(storedZones[myIndex]->port);
-   // digitalWrite(storedZones[myIndex]->gpio,LOW); //old code
     storedZones[myIndex]->open = true;
   }  
 }
-// ----------------------------------------------------------------------------]
+// ---------------------------------------------------------------------------]
 
-// FUNCTION - [readconsumption] - [Returns the current version from the Object-]
+// FUNCTION - [readconsumption] - [Returns the current vers. from the Object--]
 double SPRINKLERSYSTEM::readConsumption(void){
   return (this->readMeter() - this->consumption);
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
-// FUNCTION - [readmeter] - [Returns the current version from the Object--------]
+// FUNCTION - [readmeter] - [Returns the current version from the Object-------]
 double SPRINKLERSYSTEM::readMeter(void){
   double val;
   val = flowmeter->readOut();
   return val;
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
-// FUNCTION - [readmeter] - [Returns the current version from the Object--------]
+// FUNCTION - [readmeter] - [Returns the current version from the Object-------]
 double SPRINKLERSYSTEM::readMeter(char type){
   double val;
   val = flowmeter->readOut(type);
   return val;
 }
- // ----------------------------------------------------------------------------] 
+// ----------------------------------------------------------------------------] 
 
 // FUNCTION - [removeZone] - [Returns the current version from the Object------]
 void SPRINKLERSYSTEM::removeZone(const char* name){
@@ -357,7 +484,7 @@ void SPRINKLERSYSTEM::removeZone(const char* name){
 // FUNCTION - [readmeter] - [Returns the current version from the Object-------]
 bool SPRINKLERSYSTEM::runZone(const char * zoneName){
   if (strcmp(this->valvePosition(),"OPEN")!=0){
-    const char * result = this->setValve("OPEN");
+    const char * result = this->setValve("OPEN");   ///////////////////CHECK THIS!!!!!!!!!!!!
   }
   this->closeZone(this->isEnabled());
   //store the consumption in the individual zone
@@ -374,7 +501,7 @@ void SPRINKLERSYSTEM::setCanceled(bool val){
 }
 // ----------------------------------------------------------------------------] 
 
-// FUNCTION - [setconsumption] - [Returns the current version from the Object-]
+// FUNCTION - [setconsumption] - [Returns the current version from the Object--]
 void SPRINKLERSYSTEM::setConsumption(void){
   this->consumption = this->readMeter();
 }
@@ -411,7 +538,7 @@ void SPRINKLERSYSTEM::setProgram(int programNum){
   if (programNum ==2){prog = "programb";j=4;}
   if (programNum ==3){prog = "programc";j=5;}
   if (programNum ==4){this->program =programNum; return;}
-  File progfile = SD.open("/config/programmes.cnf");
+  File progfile = SPIFFS.open("/programmes.cnf","r");
   if (progfile){
     DynamicJsonDocument doc(1024);
     deserializeJson(doc, progfile); 
@@ -421,7 +548,7 @@ void SPRINKLERSYSTEM::setProgram(int programNum){
     }
     progfile.close();
   }
-  File file = SD.open("/config/system.cnf");
+  File file = SPIFFS.open("/system.cnf","r");
   if (file){
     DynamicJsonDocument doc(1024);
     deserializeJson(doc, file); 
@@ -455,23 +582,6 @@ const char* SPRINKLERSYSTEM::setValve(const char* value){
 bool SPRINKLERSYSTEM::startSpiffFs(){
   if(!SPIFFS.begin()){return 0;}
   else {return 1;}
-}
-// ----------------------------------------------------------------------------]
-
-// FUNCTION - [startSDfs] - [Starts file system services-----------------------]
- bool SPRINKLERSYSTEM::startSDfs(){
-  if(!SD.begin()){return 0;}
-    File root = SD.open("/meter");
-    if(!root.isDirectory()){
-      SD.mkdir("/meter");
-    }  
-    root.close();
-    root = SD.open("/config");
-    if(!root.isDirectory()){
-      SD.mkdir("/config");
-    }  
-    root.close();
-    return 1;
 }
 // ----------------------------------------------------------------------------]
 
@@ -517,7 +627,7 @@ const char* SPRINKLERSYSTEM::valvePosition(void){
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [writePf575] - [Writes to PF575 GPIO Expander--------------------]
+// PRIVATE - [writePf575] - [Writes to PF575 GPIO Expander---------------------]
 void SPRINKLERSYSTEM::writePf575(uint16_t data){
   Wire.beginTransmission(this->pf575address);
   Wire.write(lowByte(data));
