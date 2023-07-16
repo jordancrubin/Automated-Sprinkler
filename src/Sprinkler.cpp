@@ -3,7 +3,7 @@
   part of the Irrigation Automation Project for ESP32 Using both the 
   5 wirevalve project and the watermeter projects in the design.  More at
   https://www.youtube.com/c/jordanrubin6502
-  2022 Jordan Rubin.
+  2023 Jordan Rubin.
 */
 #include <Arduino.h>
 #include <Sprinkler.h>
@@ -20,7 +20,7 @@ SPRINKLERSYSTEM::SPRINKLERSYSTEM(int pf575addr, int lcdi2cval, int lcdrowsval, i
   this->lcdaddress = lcdi2cval;
   this->lcdrows = lcdrowsval;
   this->lcdcols = lcdcolsval;
-  WiFiClientSecure client;
+  WiFiClientSecure client;    
 }
 // ----------------------------------------------------------------------------]
 
@@ -42,23 +42,36 @@ void SPRINKLERSYSTEM::activateSolenoid(int solenoidNum){
   int offVal = 0B1111111111111111;
   mask = mask << (solenoidNum-1);
   int result = offVal ^ mask;
-Serial.println(result, BIN);
   this->writePf575(result); 
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [addDetabase] - [Adds Detabase connection to the object----------]
+// FUNCTION - [addDetabase] - [Adds Detabase connection to the object----------] 
 bool SPRINKLERSYSTEM::addDetabase(const char* id, const char* name, const char* apikey){
-  detaObj = new DetaBaseObject(this->client, id, name, apikey, true);
+  char* _id = new char[strlen(id)+1];         strcpy(_id, id);
+  char* _name = new char[strlen(name)+1];     strcpy(_name, name);
+  char* _apikey = new char[strlen(apikey)+1]; strcpy(_apikey, apikey);
+  detaObj = new DetaBaseObject(client, _id, _name, _apikey, true);
   this->hasDetabase = true;
   const char * testid = detaObj->getDetaID();
+  strcpy(acct.id,_id);
+  strcpy(acct.name,_name);
+  strcpy(acct.apikey,_apikey);
   if (strcmp(testid,id)==0){
     this->detabaseconnect = true;
-      printResult(detaObj->query("{\"query\":[{\"age?lt\": 10}]}"));
+    xTaskCreatePinnedToCore(this->databaseQtask,"dbQtask",5000,this,1,&Task1,1); 
     return 1;
   }
   return 0;
  }
+// ----------------------------------------------------------------------------]
+
+// FUNCTION - [getDataAcct] - [Pull login info for detabase--------------------]
+void SPRINKLERSYSTEM::getDetaAcct(dbcreds * r){
+ strcpy(r->name,acct.name);
+ strcpy(r->id,acct.id); 
+ strcpy(r->apikey,acct.apikey);
+}
 // ----------------------------------------------------------------------------]
 
 // FUNCTION - [addMeter] - [Adds a water meter to the Object-------------------]
@@ -121,7 +134,7 @@ void SPRINKLERSYSTEM::begin(){
   lcd->setCursor(0, 1);
   lcd->print("  Boot  Framework");
   lcd->setCursor(0, 2);
-    if(!startSpiffFs()){
+  if(!startSpiffFs()){
     lcd->print("SPIFFS: Mount err."); 
     return;
   } 
@@ -130,7 +143,7 @@ void SPRINKLERSYSTEM::begin(){
 }
 // ----------------------------------------------------------------------------] 
 
-// FUNCTION - [clearEnabled] - [clears the enabled flagfrom the Object---------]
+// FUNCTION - [clearEnabled] - [clears the enabled flag from the Object--------]
 void SPRINKLERSYSTEM::clearEnabled(){
   this->enabled = " ";
   this->active = false;
@@ -138,11 +151,147 @@ void SPRINKLERSYSTEM::clearEnabled(){
 // ----------------------------------------------------------------------------] 
 
 // FUNCTION - [closeZone] - [Returns the current version from the Object-------]
-void SPRINKLERSYSTEM::closeZone(const char* name){
+void SPRINKLERSYSTEM::closeZone(const char* name, unsigned long now){
   int myIndex = this->getIndex(name);
   if (myIndex >=0 && myIndex <=maxZones+1) {
     this->activateSolenoid(-1);
+    int dbKey;
+    dbKey = storedZones[myIndex]->dbKey;
+    StaticJsonDocument<200> doc;
+    char dbstr[11];
+    sprintf(dbstr, "%d", dbKey);    
+    doc["set"]["edtime"] = now;
+    doc["set"]["edmeter"] = round(10 * this->readMeter()) / 10;
+    doc["set"]["duration"] = now-dbKey;
+    doc["set"]["consumption"] = round(10 * this->readConsumption()) / 10;
+    String serialout;
+    serializeJson(doc, serialout);   
+    database("UPDATE",serialout.c_str(),dbstr);
+    setMeter(round(10 * this->readMeter()) / 10); 
+    storedZones[myIndex]->dbKey = 0;
     storedZones[myIndex]->open = false;
+  }
+}
+// ----------------------------------------------------------------------------]
+
+// FUNCTION - [database] - [database interactor -------------------------------]
+int SPRINKLERSYSTEM::database(const char * action, const char * value){ 
+  int freeslot =-1;
+  for (int i = 0; i < 5; i++) {
+    if(dbq[i].timestamp ==0){
+      freeslot =i;  
+      break;
+    }
+  }
+  if (freeslot <0){
+    return 1;
+  }
+  dbq[freeslot].timestamp = millis();
+  strcpy(dbq[freeslot].Action, action);
+  strcpy(dbq[freeslot].Payload, value);
+  return 0;
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [database] - [database interactor -------------------------------]
+int SPRINKLERSYSTEM::database(const char * action, const char * value, const char * value2){ 
+  int freeslot =-1;
+  for (int i = 0; i < 5; i++) {
+    if(dbq[i].timestamp ==0){
+      freeslot =i;  
+      break;
+    }
+  }
+  if ( (strcmp(action,"QUERY")==0) || (strcmp(action,"SELECT")==0) ){
+    for (int i = 0; i < 5; i++) {
+      if(strcmp(dbq[i].name,value)==0){ 
+        freeslot =i;  
+        break; 
+     }
+    }
+  }
+  if (freeslot <0){
+    return 1;
+  }
+  dbq[freeslot].timestamp = millis();
+  strcpy(dbq[freeslot].Action, action);
+  strcpy(dbq[freeslot].Payload, value);
+  strcpy(dbq[freeslot].Payload2, value2);
+  if ( (strcmp(action,"QUERY")==0) || (strcmp(action,"SELECT")==0) ){
+    strcpy(dbq[freeslot].name, value);
+  }
+  return 0;
+}
+
+// TASK - [databaseQtask] - [Processes Database Queue -------------------------]
+void SPRINKLERSYSTEM::databaseQtask(void *pvParameters){
+  SPRINKLERSYSTEM *taskThis = (SPRINKLERSYSTEM *) pvParameters;
+  for(;;){
+  bool found =0;     
+  int slot;
+  int arrayval;
+  for (int i = 0; i < 5; i++) {    
+    if(taskThis->dbq[i].timestamp ==0){
+Serial.print(i);Serial.print("] ");Serial.print(taskThis->dbq[i].timestamp); Serial.println(" NULL");
+      continue;
+    }
+    if(taskThis->dbq[i].timestamp ==-1){
+Serial.print(i); Serial.print(" Active-> ");Serial.println(taskThis->dbq[i].name);
+      continue;
+    }
+
+Serial.print(i); Serial.print(" FOUND ");Serial.println(taskThis->dbq[i].timestamp);   
+    found = true;
+    slot = taskThis->dbq[i].timestamp;
+    break;
+  }
+  if (!found){Serial.println("Idle"); sleep(5);continue;}  
+Serial.print("slot: "); Serial.println(slot);
+  for(int j=0; j<5; j++){
+    unsigned long ts = taskThis->dbq[j].timestamp;
+    if (ts == 0){  
+Serial.print(j);  Serial.println(" *ZERO*");
+      continue;
+    }
+Serial.print(j);Serial.print(" -> ["); Serial.print(slot);   Serial.print(" -> ["); Serial.print(ts);Serial.println("]");
+    if(slot >= ts ){     
+      slot = ts;
+      Serial.print(j);  Serial.print(" ++> "); Serial.println(taskThis->dbq[j].timestamp);
+      arrayval =j; 
+    }
+  }
+      result myresult;
+      if(strcmp(taskThis->dbq[arrayval].Action,"PUT")==0){
+        myresult = taskThis->detaObj->putObject(taskThis->dbq[arrayval].Payload);
+      }
+      if(strcmp(taskThis->dbq[arrayval].Action,"SELECT")==0){
+        myresult = taskThis->detaObj->getObject(taskThis->dbq[arrayval].Payload2);
+        taskThis->dbq[arrayval].result = myresult.reply;
+        taskThis->dbq[arrayval].timestamp = -1;
+ //Serial.println(myresult.reply);       
+      }
+      if(strcmp(taskThis->dbq[arrayval].Action,"DELETE")==0){
+        myresult = taskThis->detaObj->deleteObject(taskThis->dbq[arrayval].Payload);
+      }
+       if(strcmp(taskThis->dbq[arrayval].Action,"INSERT")==0){
+        myresult = taskThis->detaObj->insertObject(taskThis->dbq[arrayval].Payload);
+      }
+       if(strcmp(taskThis->dbq[arrayval].Action,"UPDATE")==0){
+        myresult = taskThis->detaObj->updateObject(taskThis->dbq[arrayval].Payload,taskThis->dbq[arrayval].Payload2);
+//Serial.println(myresult.reply);
+      }
+       if(strcmp(taskThis->dbq[arrayval].Action,"QUERY")==0){
+        myresult = taskThis->detaObj->query(taskThis->dbq[arrayval].Payload2);
+        taskThis->dbq[arrayval].result = myresult.reply;
+//Serial.println(taskThis->dbq[arrayval].result);      
+        taskThis->dbq[arrayval].timestamp =-1;
+      }
+   Serial.print(taskThis->dbq[arrayval].Action);   
+  if ( (strcmp(taskThis->dbq[arrayval].Action,"QUERY")!=0) && (strcmp(taskThis->dbq[arrayval].Action,"SELECT")!=0)){
+Serial.print("Deleted");  
+    taskThis->dbq[arrayval].timestamp =0;
+  }
+    sleep(2);
   }
 }
 // ----------------------------------------------------------------------------]
@@ -150,6 +299,24 @@ void SPRINKLERSYSTEM::closeZone(const char* name){
 // FUNCTION - [getDatabaseActive] - [returns connection state of Database------]
 bool SPRINKLERSYSTEM::getDatabaseActive(){
   return this->detabaseconnect;
+}
+// ----------------------------------------------------------------------------] 
+
+// FUNCTION - [getDatabaseQuery] - [returns Selected Query from the queue------]
+String SPRINKLERSYSTEM::getDatabaseQuery(const char * queryname){
+  int value;
+  for (int i = 0; i < 5; i++) {
+    if(strcmp(dbq[i].name,queryname)==0){ 
+      while (dbq[i].timestamp > 0){
+        sleep(2);
+      }
+        strcpy(dbq[i].name, "");
+        dbq[i].timestamp =0;
+        value =i; 
+        break;   
+   }
+  }
+  return dbq[value].result;
 }
 // ----------------------------------------------------------------------------] 
 
@@ -195,6 +362,13 @@ char SPRINKLERSYSTEM::getMeasureType(){
   return this->measure;
 }
 // ----------------------------------------------------------------------------] 
+
+// FUNCTION - [getPort] - [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx----------------]
+int SPRINKLERSYSTEM::getPort(const char* name){
+  int myIndex = this->getIndex(name); 
+  return storedZones[myIndex]->port;
+}
+// ----------------------------------------------------------------------------]
 
 // FUNCTION - [getProgram] - [Returns the current program from the Object------]
 int SPRINKLERSYSTEM::getProgram(){
@@ -256,9 +430,10 @@ int SPRINKLERSYSTEM::getZoneRemaining(){
   return this->zoneRemaining;
 }
 // ----------------------------------------------------------------------------] 
+
 // FUNCTION - [lcdClearRow] - [Blanks entire row of LCD screen-----------------]
 void SPRINKLERSYSTEM::lcdClearRow(int row){
-  while (this->lcdlock){delay (lcdLockDelay);}
+  lcdLockCheck();
   lcd->setCursor(0, row);
   for(int i=0; i< this->lcdrows; i++){
     lcd->print(" ");
@@ -271,12 +446,24 @@ void SPRINKLERSYSTEM::lcdClearRow(int row){
 void SPRINKLERSYSTEM::lcdDisplaySwVersion(const char * version){
   this->lcdPrint("clearrow",4,0,"-RubinTech-");
   this->lcdPrint("clearrow",3,1,"*ESPIRRIGATE*");
-  this->lcdPrint("clearrow",1,2,"JORDAN RUBIN 2022");
+  this->lcdPrint("clearrow",1,2,"JORDAN RUBIN 2023");
   this->lcdPrint("clearrow",0,3,"VER. ");
   this->lcdPrintConcat(version);
   delay(8000);
 }
 // ----------------------------------------------------------------------------] 
+
+// PRIVATE - [lcdLockCheck] - [Conducts LCD Lock Unlock timing functions-------]
+void SPRINKLERSYSTEM::lcdLockCheck(){
+  int time = millis();
+  while (this->lcdlock){ 
+    delay(20);
+    if((millis()-time) > lcdlockmax){
+      return;      
+    }
+  }
+}
+// ----------------------------------------------------------------------------]   
 
 // FUNCTION - [lcdPower] - [Turns the LCD screen ON or OFF---------------------]
 void SPRINKLERSYSTEM::lcdPower(bool state){
@@ -289,16 +476,17 @@ void SPRINKLERSYSTEM::lcdPower(bool state){
   }
 }
 // ----------------------------------------------------------------------------] 
+
 // FUNCTION - [lcdPrint] - [prints text to the LCD screen----------------------]
 void SPRINKLERSYSTEM::lcdPrint(const char * option, int col, int row, const char* text){
-  while (this->lcdlock){delay (lcdLockDelay);}
+  lcdLockCheck();
   this->lcdlock = true;
-  if(strcmp(option,"clearrow")==0){
+  if(strcmp(option,"clr")==0){
     this->lcdlock = false;
     lcdClearRow(row);
     this->lcdlock = true;
   }
-  if(strcmp(option,"clearscreen")==0){lcd->clear();}
+  if(strcmp(option,"cls")==0){lcd->clear();}
   if(strcmp(option,"init")==0){
     lcd->begin(this->lcdrows,this->lcdcols);
     lcd->clear();
@@ -312,14 +500,14 @@ void SPRINKLERSYSTEM::lcdPrint(const char * option, int col, int row, const char
 
 // FUNCTION - [lcdPrint] - [prints text to the LCD screen----------------------]
 void SPRINKLERSYSTEM::lcdPrint(const char * option, int col, int row, int num){
-  while (this->lcdlock){delay (lcdLockDelay);}
+  lcdLockCheck();
   this->lcdlock = true;
-  if(strcmp(option,"clearrow")==0){
+  if(strcmp(option,"clr")==0){
     this->lcdlock = false;
     lcdClearRow(row);
     this->lcdlock = true;
   }
-   if(strcmp(option,"clearscreen")==0){lcd->clear();}
+   if(strcmp(option,"cls")==0){lcd->clear();}
    if(strcmp(option,"init")==0){
     lcd->begin(this->lcdrows,this->lcdcols);
     lcd->clear();
@@ -333,7 +521,7 @@ void SPRINKLERSYSTEM::lcdPrint(const char * option, int col, int row, int num){
 
 // FUNCTION - [lcdPrint] - [continue of print text to the LCD screen from last-]
 void SPRINKLERSYSTEM::lcdPrintConcat(const char* text){
-  while (this->lcdlock){delay (lcdLockDelay);}
+  lcdLockCheck();
   this->lcdlock = true;
   lcd->print(text);
   delay(50);
@@ -343,7 +531,7 @@ void SPRINKLERSYSTEM::lcdPrintConcat(const char* text){
 
 // FUNCTION - [lcdPrint] - [continue of print text to the LCD screen from last-]
 void SPRINKLERSYSTEM::lcdPrintConcat(int num){
-  while (this->lcdlock){delay (50);}
+  lcdLockCheck();
   this->lcdlock = true;
   lcd->print(num);
   delay(50);
@@ -405,17 +593,27 @@ bool SPRINKLERSYSTEM::isTodayComplete(tm * time){
 }
 // ----------------------------------------------------------------------------]
 
+// FUNCTION - [loadMeter] - [Returns the current version from the Object-------]
+void SPRINKLERSYSTEM::loadMeter(void){
+  database("SELECT","loadmeter","meter");
+  String returnVal = getDatabaseQuery("loadmeter");
+  DynamicJsonDocument doc(1024);
+  deserializeJson(doc, returnVal); 
+  double meterval = doc["value"];
+  flowmeter->setMeter(meterval); 
+}
+// ---------------------------------------------------------------------------] 
+
 // FUNCTION - [meterMoved] - [Returns the current version from the Object------]
 bool SPRINKLERSYSTEM::meterMoved(void){
-  bool status;
-  status = flowmeter->updated();
-  return status;
+  if (lastConsumption == readConsumption()){return 0;}
+  return 1;
 }
 // ---------------------------------------------------------------------------] 
 
 // FUNCTION - [offsetManual] - [Returns the current version from the Object----]
 void SPRINKLERSYSTEM::offsetManual(const char* name, tm * time){
-    if (manualZoneChange){
+  if (manualZoneChange){
     if (!inManual){
       backupStartTime = startTime;
     }
@@ -440,6 +638,7 @@ void SPRINKLERSYSTEM::cancelManual(){
 
 // FUNCTION - [openZone] - [Returns the current version from the Object-------]
 void SPRINKLERSYSTEM::openZone(const char* name){
+  lastConsumption =-1;
   int myIndex = this->getIndex(name);
   if (myIndex >=0 && myIndex <=maxZones+1) {
     this->setConsumption();
@@ -451,14 +650,15 @@ void SPRINKLERSYSTEM::openZone(const char* name){
 
 // FUNCTION - [readconsumption] - [Returns the current vers. from the Object--]
 double SPRINKLERSYSTEM::readConsumption(void){
-  return (this->readMeter() - this->consumption);
+  lastConsumption = this->readMeter() - this->consumption;
+  return (lastConsumption);
 }
 // ----------------------------------------------------------------------------] 
 
 // FUNCTION - [readmeter] - [Returns the current version from the Object-------]
 double SPRINKLERSYSTEM::readMeter(void){
   double val;
-  val = flowmeter->readOut();
+  val = flowmeter->readOut(); 
   return val;
 }
 // ----------------------------------------------------------------------------] 
@@ -466,7 +666,7 @@ double SPRINKLERSYSTEM::readMeter(void){
 // FUNCTION - [readmeter] - [Returns the current version from the Object-------]
 double SPRINKLERSYSTEM::readMeter(char type){
   double val;
-  val = flowmeter->readOut(type);
+  val = flowmeter->readOut(type); 
   return val;
 }
 // ----------------------------------------------------------------------------] 
@@ -481,13 +681,25 @@ void SPRINKLERSYSTEM::removeZone(const char* name){
 }
 // ----------------------------------------------------------------------------]
 
-// FUNCTION - [readmeter] - [Returns the current version from the Object-------]
-bool SPRINKLERSYSTEM::runZone(const char * zoneName){
+// FUNCTION - [runZone] - [Conducts the run zone process ----------------------]
+bool SPRINKLERSYSTEM::runZone(const char * zoneName, unsigned long now){
+  int myIndex = this->getIndex(zoneName);
+  StaticJsonDocument<200> doc;
+  char nowstr[11];
+  sprintf(nowstr, "%d", now);
+  doc["items"][0]["key"] = nowstr;
+  doc["items"][0]["port"] = storedZones[myIndex]->port;
+  doc["items"][0]["trigger"] = manualZoneChange;
+  doc["items"][0]["stmeter"] = round(10 * this->readMeter()) / 10;
+  String serialout;
+  serializeJson(doc, serialout);
+Serial.print(serialout);
+  database("PUT",serialout.c_str());
   if (strcmp(this->valvePosition(),"OPEN")!=0){
-    const char * result = this->setValve("OPEN");   ///////////////////CHECK THIS!!!!!!!!!!!!
+    const char * result = this->setValve("OPEN");   //////////ACCEPTABLE WARNING
   }
-  this->closeZone(this->isEnabled());
-  //store the consumption in the individual zone
+  this->closeZone(this->isEnabled(),now); 
+  storedZones[myIndex]->dbKey  = now; //  storedZones[myIndex]->dbKey = nowstr;
   this->openZone(zoneName);
   this->enabled = zoneName;
   this->active = true;
@@ -527,7 +739,13 @@ void SPRINKLERSYSTEM::setManualZoneChange(bool val){
 
 // FUNCTION - [setMeter] - [set meter value------------------------------------]
 void SPRINKLERSYSTEM::setMeter(double val){
-  flowmeter->setMeter(val); 
+  StaticJsonDocument<100> doc;
+  doc["items"][0]["key"] = "meter";
+  doc["items"][0]["value"] = val;
+  String serialout;
+  serializeJson(doc, serialout);
+  database("PUT",serialout.c_str());
+  flowmeter->setMeter(val);  
 }
 // ----------------------------------------------------------------------------] 
 
@@ -600,6 +818,11 @@ int SPRINKLERSYSTEM::timeToProgStart(tm * sttime){
 void SPRINKLERSYSTEM::updateMeter(){
   double val = flowmeter->readOut();
   flowmeter->setMeter(val);
+  StaticJsonDocument<200> doc; 
+  doc["set"]["meter"] = val;
+  String serialout;
+  serializeJson(doc, serialout);
+  database("UPDATE",serialout.c_str(),"meter");
 }
 // ----------------------------------------------------------------------------] 
 

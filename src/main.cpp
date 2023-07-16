@@ -4,9 +4,9 @@
   any extra libraries beyond what I regularly use in my projects to put an ESP32
   on the network with an interactive Web based GUI. 
   https://www.youtube.com/c/jordanrubin6502
-  2022 Jordan Rubin.
+  2023 Jordan Rubin.
 */
-#define POWER_MONITOR_PIN 27
+
 #define FACDEFDELAY 5000
 #define FACDEFPIN 0
 #define LCDCOLS 4
@@ -28,7 +28,6 @@
 #include <HTTPClient.h>
 #include <Sprinkler.h>
 #include <time.h>
-#include <WiFiClientSecure.h>
 #include <WiFiAP.h>
 
 const char* deviceName = "sprinkler32";  //Mdns name sprinkler32.local
@@ -36,17 +35,19 @@ double lastTimepoll = -60000;
 const char* ntpServer = "pool.ntp.org";
 const char* ssid = "sprinklernet";    //SSID of the netconfig Access point
 struct tm timeinfo;
+bool detabaseconnect;
 bool displayLock;
 int displayprogram = 0;
+bool hasDetabase;
 int lastEncval;
 int menulevel   = 0;
 int selectlevel = 0;
+int updatepullstatsflag = -1;
 unsigned long powerDebounceTime = 0;
 int programMenu = -1;
 bool setManualFlag = false;
 bool setCancelFlag = false;
 bool zoneChangeFlag = false;
-bool powerFlag = false;
 const char* version = "1.0.0b";
 char selectedProgram[20];
 const char * menu[3][5] = {
@@ -95,7 +96,7 @@ String getContentType(String filename) {
 //////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[cookieParser]-----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
-void cookieParser(char (& Array)[4][70],  const char * input){
+void cookieParser(char (& Array)[4][70], const char * input){
   int currentCookie = 0, count = 0;
   const char * token = input;
   for(int i=0; i< strlen(token); i++){
@@ -167,7 +168,6 @@ void writeConfigFile(const char* value, const char* filename, const char* parame
     deserializeJson(doc, file);
     file.close();
     doc[value] = parameter;
-//serializeJson(doc, Serial); //////////////////////////////???????????
     File file = SPIFFS.open(filename,"w");
     serializeJson(doc, file); 
   } 
@@ -182,16 +182,9 @@ void loadConfig(){
   sprinklersystem.lcdClearRow(3);
   sprinklersystem.lcdClearRow(1);
   sprinklersystem.lcdClearRow(2);
-  sprinklersystem.lcdPrint("clearrow",0,1,"LOADCFG:");
+  sprinklersystem.lcdPrint("clr",0,1,"LOADCFG:");
   File file = SPIFFS.open("/system.cnf","r");
-  sprinklersystem.lcdPrint("clearrow",0,2,"/system.cnf");
-///////////////
-//while (file.available()) {
-//  Serial.write(file.read());
-//}
-//file.close();
-//file = SPIFFS.open("/system.cnf","r");
-/////////////   
+  sprinklersystem.lcdPrint("clr",0,2,"/system.cnf"); 
   DynamicJsonDocument doc(1024);
   deserializeJson(doc, file);  
   file.close();  
@@ -200,7 +193,8 @@ void loadConfig(){
   const char* meas = doc["meas"];
   const char* deb = doc["mtrdeb"];
   const char* inc = doc["mtrinc"];
-  sprinklersystem.addMeter(atoi(mtrio),1,meas[0],atoi(deb),1,atof(inc),saveinterval,true);
+  //i changed param 5 to 0
+  sprinklersystem.addMeter(atoi(mtrio),1,meas[0],atoi(deb),0,atof(inc),saveinterval,true);
   const char* valopio = doc["valopio"];
   const char* valclio = doc["valclio"];
   const char* valrlyio = doc["valrlyio"];
@@ -229,8 +223,7 @@ void loadConfig(){
       sprinklersystem.setProgram(atoi(program));
     }
     if (doc.containsKey("rainsensstatus")){
-      const char* rainsensstatus = doc["rainsensstatus"];
-      Serial.print("rainsens key defined "); Serial.println(atoi(rainsensstatus)); 
+      const char* rainsensstatus = doc["rainsensstatus"]; 
       sprinklersystem.setRainsensorStatus(atoi(rainsensstatus));
     }
     else {
@@ -241,6 +234,7 @@ void loadConfig(){
 //save value of 1
        } 
     }
+   sprinklersystem.loadMeter(); 
    const char* tzData = doc["timez"];
    setenv("TZ", tzData, 1 );
    tzset();
@@ -285,7 +279,11 @@ bool startZone(const char * zone) {
   String message = "Starting zone -> ";
   message.concat(zone);
   logger(message);
-  sprinklersystem.runZone(zone);
+  unsigned long tst;
+  time_t now;
+  getLocalTime(&timeinfo);
+  tst = time(&now);
+  sprinklersystem.runZone(zone, tst);
   delay(2000);
   lastTimepoll = -25000;
   return 0;
@@ -403,6 +401,15 @@ void handleLogout(AsyncWebServerRequest *request) {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[handlePullStats]--------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void handlePullStats(AsyncWebServerRequest *request) { 
+  updatepullstatsflag = atoi(request->arg("statsdays").c_str()); 
+  request->send(200, "text/html", "{\"s\":\"1\"}");
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handleCancelrun]--------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleCancelrun(AsyncWebServerRequest *request) { 
@@ -485,12 +492,7 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleUpdateStatus]-----------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleUpdateStatus(AsyncWebServerRequest *request) {
-  String state;
-  String info;
-  String zname;
-  String valve;
-  String rsState;
-  String rsExist;
+  String state, info, zname, valve, rsState, rsExist;
   int i = sprinklersystem.timeToProgStart(&timeinfo); 
   const char * valvePos = sprinklersystem.valvePosition();
   bool rs = sprinklersystem.readRainSensor();
@@ -577,7 +579,8 @@ void handleGetZoneList(AsyncWebServerRequest *request) {
   String s = "[";
   for (int i = 0; i < lastOption; ++i) {
     const char * desc = sprinklersystem.getDescription(nameList[i]);
-    s=s+"{\"name\":\""+desc+"\",\"val\":\""+nameList[i]+"\"},";        
+    int port = sprinklersystem.getPort(nameList[i]);
+    s=s+"{\"name\":\""+desc+"\",\"port\":\""+port+"\",\"val\":\""+nameList[i]+"\"},";        
   } 
   int lastIndex = s.length() - 1;
   s.remove(lastIndex);
@@ -585,6 +588,19 @@ void handleGetZoneList(AsyncWebServerRequest *request) {
   request->send(200, "text/html", s);
 }
 //-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[handleGetCreds]---------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void handleGetCreds(AsyncWebServerRequest *request) {
+  dbcreds detacreds;
+  sprinklersystem.getDetaAcct(&detacreds);
+  String apikey = detacreds.apikey;
+  String name = detacreds.name;
+  String id = detacreds.id; 
+  String S = "{\"a\":\""+apikey+"\",\"n\":\""+name+"\",\"i\":\""+id+"\"}";
+  request->send(200, "text/html", S);
+}
 
 //////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handleSendManual]------------------------------------------]
@@ -627,7 +643,7 @@ String sha1(String payloadStr){
     for(uint16_t i = 0; i < size; i++) {
       String hex = String(shaResult[i], HEX);
       if(hex.length() < 2) {
-          hex = "0" + hex;
+        hex = "0" + hex;
       }
       hashStr += hex;
     }
@@ -647,10 +663,12 @@ void serverRouting() {
   server.on("/getProg",       HTTP_POST, handleGetprogram);
   server.on("/getRainsense",  HTTP_POST, handleGetrainSense);
   server.on("/getZoneList",   HTTP_GET,  handleGetZoneList);
+  server.on("/getCreds",      HTTP_GET,  handleGetCreds);
   server.on("/readMeter",     HTTP_POST, handleReadMeter);
   server.on("/sendManual",    HTTP_POST, handleSendManual);
   server.on("/sendNewMeter",  HTTP_POST, handleSubmitNewMeter);
   server.on("/updateStatus",  HTTP_POST, handleUpdateStatus);
+  server.on("/metricRequest", HTTP_POST, handlePullStats);
   server.onNotFound([](AsyncWebServerRequest *request) {  // If the client requests any URI
     if (!handleFileRead(request, request->url())){        // send it if it exists
       handleNotFound(request); // respond 404 
@@ -700,11 +718,11 @@ void handleWifiList(AsyncWebServerRequest *request) {
 //-FUNCTION-[configNetwork]----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void configNetwork() { 
-  sprinklersystem.lcdPrint("clearscreen",0,0,"RubinTech");
-  sprinklersystem.lcdPrint("clearscreen",0,1,"WIFI: sprinklernet");
-  sprinklersystem.lcdPrint("clearscreen",0,2,"Configure at");
+  sprinklersystem.lcdPrint("cls",0,0,"RubinTech");
+  sprinklersystem.lcdPrint("clr",0,1,"WIFI: sprinklernet");
+  sprinklersystem.lcdPrint("clr",0,2,"Configure at");
   sprinklersystem.lcdClearRow(3);
-  sprinklersystem.lcdPrint("clearscreen",0,3,deviceName);
+  sprinklersystem.lcdPrint("clr",0,3,deviceName);
   sprinklersystem.lcdPrintConcat(".local");
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(ssid);
@@ -749,39 +767,39 @@ void configNetwork() {
 //-FUNCTION-[loadNetwork]------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void loadNetwork() {
-    char ssid[50]; 
-    readConfigFile(ssid,"/network.cnf","SSID");  
-    sprinklersystem.lcdPrint("clearrow",0,2,"Connecting");
-    sprinklersystem.lcdClearRow(3);
-    char key[50];
-    readConfigFile(key,"/network.cnf","PASSWORD");  
-    if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
-    WiFi.begin(ssid,key);
-    int i =0;
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      sprinklersystem.lcdPrint("none",i,3,".");
-      i++;
-      if (i==15){
-        sprinklersystem.lcdPrint("clearrow",0,2,"Connect Fail");
-        sprinklersystem.lcdPrint("clearrow",0,3,"Restart....");
-        delay(100);    
-        startup();        
+  char ssid[50]; 
+  readConfigFile(ssid,"/network.cnf","SSID");  
+  sprinklersystem.lcdPrint("clr",0,2,"Connecting");
+  sprinklersystem.lcdClearRow(3);
+  char key[50];
+  readConfigFile(key,"/network.cnf","PASSWORD");  
+  if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
+   WiFi.begin(ssid,key);
+  int i =0;
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    sprinklersystem.lcdPrint("none",i,3,".");
+    i++;
+    if (i==15){
+      sprinklersystem.lcdPrint("clr",0,2,"Connect Fail");
+      sprinklersystem.lcdPrint("clr",0,3,"Restart....");
+      delay(100);    
+      startup();        
     }
   }
   if (!MDNS.begin(deviceName)){
-    sprinklersystem.lcdPrint("clearrow",0,3,"mDNS: Error Starting.");
+    sprinklersystem.lcdPrint("clr",0,3,"mDNS: Error Starting.");
   }
   else {
-    sprinklersystem.lcdPrint("clearrow",0,3,deviceName);
+    sprinklersystem.lcdPrint("clr",0,3,deviceName);
     sprinklersystem.lcdPrintConcat(".local");
   }
   IPAddress ip = WiFi.localIP();
   char * ourIP = new char[20]();
   sprintf(ourIP, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-  sprinklersystem.lcdPrint("clearrow",0,2,ourIP);
+  sprinklersystem.lcdPrint("clr",0,2,ourIP);
   delay(1000);  
-  sprinklersystem.lcdPrint("clearrow",0,1,"NTP: ");
+  sprinklersystem.lcdPrint("clr",0,1,"NTP: ");
   configTime(0, 0, ntpServer);
   if (getLocalTime(&timeinfo)){
     sprinklersystem.lcdPrint("none",5,1,"OK");
@@ -808,7 +826,7 @@ void acctMgr(const char* action,const char* account,const char* val){
       accountfile.close();
     } 
     return;
- }
+  }
 }
 // ---------------------------------------------------------------------]
 
@@ -816,7 +834,6 @@ void acctMgr(const char* action,const char* account,const char* val){
 //-FUNCTION-[displayheader]---------------------------------------------] lib?
 /////////////////////////////////////////////////////////////////////////
 void displayHeader() {
-//  if (!sprinklersystem.lcdlock){
   lastTimepoll = millis();
   getLocalTime(&timeinfo);
   char ourtime[20];
@@ -824,9 +841,8 @@ void displayHeader() {
   if (!displayLock){
     sleep(1);
     sprinklersystem.lcdPrint("init",0,0,ourtime);
-    sprinklersystem.lcdPrint("clearrow",0,1,"Program");
+    sprinklersystem.lcdPrint("clr",0,1,"Program");
   }
-//  }
 }
 //-----------------------------------------------------------------------]
 
@@ -834,32 +850,15 @@ void displayHeader() {
 //-FUNCTION-[displayMeter]-----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void displayMeter() {
-//  if (!displayLock){
-  if (!sprinklersystem.lcdlock){
-    if(sprinklersystem.isActive()){
-      char mtype = sprinklersystem.getMeasureType();
-      double val = sprinklersystem.readConsumption(); 
-      sleep(1);
-char * numer = new char[20]();
-char *type = new char[2]();
-//strncat()
- // sprintf(numer, "0.3f", val);
-sprinklersystem.lcdPrint("clearrow",0,3,"numer");
-
-    //  sprinklersystem.lcdPrint("clearrow",0,3,val);
-      //lcd.setCursor(0,3);
-      //lcd.print(val);
-      //lcd.print(mtype);
-Serial.println(mtype);
- Serial.println(numer);     
-      sprinklersystem.lcdPrintConcat("mtype");
-      //lcd.setCursor(0,3);
-      char message[30];
-      sprintf(message, "%g%c", val, mtype);
-      events.send(message,"meter",millis());
-      delay(350);
-    }
-  } 
+  if(sprinklersystem.isActive()){
+    char mtype = sprinklersystem.getMeasureType();
+    double val = sprinklersystem.readConsumption(); 
+    char message[30];
+    sprintf(message, "%g%c", val, mtype);
+    sprinklersystem.lcdPrint("clr",0,3,message);
+    events.send(message,"meter",millis());
+    delay(350);
+  }
 }
 //-----------------------------------------------------------------------]
 
@@ -870,8 +869,14 @@ void closeZones() {
   String message = "Closure of zones and valve requested";
   logger(message);
   sprinklersystem.setValve("CLOSED");
-  sprinklersystem.closeZone(sprinklersystem.isEnabled());
+  unsigned long tst;
+  time_t now;
+  getLocalTime(&timeinfo);
+  tst = time(&now);
+  sprinklersystem.closeZone(sprinklersystem.isEnabled(),tst);
   sprinklersystem.clearEnabled();
+  delay(10000);
+  events.send("1","stats",millis());
 }
 //-----------------------------------------------------------------------]
 
@@ -916,7 +921,6 @@ bool checkMenu(){
     lastTimepoll = -100000;
     return 1;
   }
-
   if (strcmp(menu[menulevel][selectlevel],"EXIT MENU")==0){
     displayLock = false;
     menulevel =0;
@@ -953,7 +957,7 @@ void displayEachProgram(){
   strncpy(nameList[lastOption],"BACK",20);
   if (programMenu >= lastOption) {programMenu = lastOption;}
   strncpy(selectedProgram,nameList[programMenu],20);
-  sprinklersystem.lcdPrint("clearrow",0,2,nameList[programMenu]);
+  sprinklersystem.lcdPrint("clr",0,2,nameList[programMenu]);
 }
 //-----------------------------------------------------------------------]
 
@@ -968,7 +972,7 @@ void loadMenu(int level){
   }
   if (selectlevel>4){selectlevel=4;}
   if (selectlevel<0){selectlevel=0;}   //!!!!! change this to appropriate max value
-  sprinklersystem.lcdPrint("clearrow",0,2,menu[level][selectlevel]);
+  sprinklersystem.lcdPrint("clr",0,2,menu[level][selectlevel]);
 } 
 //-----------------------------------------------------------------------]
 
@@ -977,16 +981,16 @@ void loadMenu(int level){
 //////////////////////////////////////////////////////////////////////////
 void displayCountdown(int i) {
   if (!displayLock){  
-    sprinklersystem.lcdPrint("clearrow",0,2,"Begins in ");
+    sprinklersystem.lcdPrint("clr",0,2,"Begins in ");
     if (i > 60){
       int hours = i/60;
       int minutes = i%60;
-      sprinklersystem.lcdPrint("clearrow",0,3,hours);
+      sprinklersystem.lcdPrint("clr",0,3,hours);
       sprinklersystem.lcdPrintConcat("HR ");
       sprinklersystem.lcdPrintConcat(minutes);
     }
     else{
-      sprinklersystem.lcdPrint("clearrow",0,3,i);
+      sprinklersystem.lcdPrint("clr",0,3,i);
     }
     sprinklersystem.lcdPrintConcat(" minutes");
   }
@@ -999,12 +1003,12 @@ void displayCountdown(int i) {
 void displayProgram() {
   int testprog = sprinklersystem.getProgram();
   if (!displayLock){
-      if(testprog==1){sprinklersystem.lcdPrint("none",8,1,"[A] ");}
-      if(testprog==2){sprinklersystem.lcdPrint("none",8,1,"[B] ");}
-      if(testprog==3){sprinklersystem.lcdPrint("none",8,1,"[C] ");}
-      if(testprog==4){sprinklersystem.lcdPrint("none",8,1,"[OFF]");}
+    if(testprog==1){sprinklersystem.lcdPrint("none",8,1,"[A] ");}
+    if(testprog==2){sprinklersystem.lcdPrint("none",8,1,"[B] ");}
+    if(testprog==3){sprinklersystem.lcdPrint("none",8,1,"[C] ");}
+    if(testprog==4){sprinklersystem.lcdPrint("none",8,1,"[OFF]");}
   }
-      displayprogram = testprog;
+  displayprogram = testprog;
 }
 //-----------------------------------------------------------------------]
 
@@ -1019,34 +1023,9 @@ void handleManualsched(){
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[checkPower]-------------------------------------------------]
-//////////////////////////////////////////////////////////////////////////
-void checkPower(){
-  Serial.println(digitalRead(POWER_MONITOR_PIN));
-  if (digitalRead(POWER_MONITOR_PIN) == LOW){
-    Serial.println("Power loss detected....");
-    Serial.println("Writing meter to Filesystem.");
-    sprinklersystem.updateMeter();
-    Serial.println("Disable LCD");
-    sprinklersystem.lcdPower(0);
-    String message = "Power loss detected, writing to FS and shifting to low power mode.";
-    logger(message);
-  }
-  else{
-    Serial.println("Power restored....");
-    sprinklersystem.lcdPower(1);
-    String message = "Power restored";
-    logger(message);
-  }
-  powerFlag = false;
-}
-//-----------------------------------------------------------------------]
-
-//////////////////////////////////////////////////////////////////////////
 //-TASK-[mainPoll]-------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void mainPoll(void * parameter){
-//UBaseType_t uxHighWaterMark;
   for (;;){
     if (setManualFlag){  //---HANDLES THE MANUAL PROGRAMME TURN UP PROCESS
       sprinklersystem.isInManualProgram(true);
@@ -1069,21 +1048,16 @@ void mainPoll(void * parameter){
       selectlevel = 0;
       lastTimepoll = -100000;
     }//----------------------------------------
-delay(1000);
-  //  uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
-  //  Serial.print("MAINPT-HWM: ");Serial.println(uxHighWaterMark);
+  delay(1000);
   }
 }  
-//-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
 //-TASK-[everyMinute]----------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void everyMinute(void * parameter){
-//UBaseType_t uxHighWaterMark;
   for (;;){
     delay(700); //LCD NEEDED
-    if (powerFlag){checkPower();}
     if ((millis()-lastTimepoll) >= 30000){ //60000 NORM.
       displayHeader();
       displayProgram();
@@ -1092,7 +1066,7 @@ void everyMinute(void * parameter){
       }
       if(sprinklersystem.isCanceled()){ //HANDLE CANCELED        
         if (!displayLock){
-          sprinklersystem.lcdPrint("clearrow",7,3,"CANCELED");
+          sprinklersystem.lcdPrint("clr",7,3,"CANCELED");
         }
         if(sprinklersystem.isActive()){          
           closeZones();
@@ -1109,7 +1083,7 @@ void everyMinute(void * parameter){
         }
         sprinklersystem.setValve("CLOSED"); 
         if (!displayLock){
-          sprinklersystem.lcdPrint("clearrow",8,3,"IDLE");
+          sprinklersystem.lcdPrint("clr",8,3,"IDLE");
         }
       }
       else {
@@ -1124,8 +1098,8 @@ void everyMinute(void * parameter){
               sprinklersystem.cancelManual();
             }           
             if (!displayLock){
-              sprinklersystem.lcdPrint("clearrow",0,2,"Today's Schedule");
-              sprinklersystem.lcdPrint("clearrow",0,3,"has completed..");
+              sprinklersystem.lcdPrint("clr",0,2,"Today's Schedule");
+              sprinklersystem.lcdPrint("clr",0,3,"has completed..");
             }
             if(sprinklersystem.isActive()){
               closeZones();
@@ -1136,7 +1110,7 @@ void everyMinute(void * parameter){
               //check rain sensor
               if ((sprinklersystem.getHasRainSensor()) && (sprinklersystem.getRainSensor())){     
                 if ((sprinklersystem.readRainSensor() ==0) && (!sprinklersystem.isInManualProgram())){  //engaged AND NOT MANUAL MODE
-                  sprinklersystem.lcdPrint("clearrow",3,2,"--Rain Delay--");
+                  sprinklersystem.lcdPrint("clr",3,2,"--Rain Delay--");
                   if(sprinklersystem.isActive()){
                     closeZones();
                   }
@@ -1147,9 +1121,9 @@ void everyMinute(void * parameter){
               //PLACEHOLDER TO KICKOFF THE RUN TASK AND HALT THIS ONE
               char thiszr[4];
               itoa(zr,thiszr,10);
-              sprinklersystem.lcdPrint("clearrow",12,2,thiszr);
+              sprinklersystem.lcdPrint("clr",0,2,zoneName);
+              sprinklersystem.lcdPrint("na",12,2,thiszr);
               sprinklersystem.lcdPrintConcat("min");
-              sprinklersystem.lcdPrint("clearrow",0,2,zoneName);
             }
             startZone(zoneName); // All the functions for zone open
             displayMeter();
@@ -1164,8 +1138,6 @@ void everyMinute(void * parameter){
     if (displayprogram != testprog){
       lastTimepoll = -60000;
     }
-//    uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
-//    Serial.print("EVERYMIN-HWM: ");Serial.println(uxHighWaterMark);
   }
 }
 //-----------------------------------------------------------------------]  
@@ -1174,17 +1146,8 @@ void everyMinute(void * parameter){
 //-TASK-[rotaryLoop]-----------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void rotaryLoop(void * parameter){
-  //UBaseType_t uxHighWaterMark;
   for(;;){
 	  if (rotaryEncoder.encoderChanged()){
-Serial.print("ENCODER- ");
-Serial.print("PM:"); Serial.print(programMenu);
-Serial.print(" SL:"); Serial.print(selectlevel);
-Serial.print(" ML:"); Serial.println(menulevel);
-int txt = rotaryEncoder.readEncoder();
-Serial.print(" VAL:"); Serial.println(txt);
-
-
       if (displayLock){
         int encval = rotaryEncoder.readEncoder();
         if (encval < lastEncval){
@@ -1223,11 +1186,11 @@ Serial.print(" VAL:"); Serial.println(txt);
 void startup(){
   acctMgr("inspect","admin","0");
   if (SPIFFS.exists("/network.cnf")){  
-     sprinklersystem.lcdPrint("clearrow",0,3,"NETWK: Loading");
+     sprinklersystem.lcdPrint("clr",0,3,"NETWK: Loading");
      loadNetwork();
   }
   else {
-    sprinklersystem.lcdPrint("clearrow",0,3,"NETWK: No Config");   
+    sprinklersystem.lcdPrint("clr",0,3,"NETWK: No Config");   
      configNetwork();    
   }
   server.on("/getWifiList",  HTTP_GET, handleWifiList);
@@ -1239,7 +1202,7 @@ void startup(){
     }
     // send event with message "hello!", id current millis
     // and set reconnect delay to 1 second
-   client->send("INIT", NULL, millis(), 10000);
+    client->send("INIT", NULL, millis(), 10000);
   });
   serverRouting();
   server.addHandler(&events);
@@ -1252,12 +1215,12 @@ void startup(){
       sprinklersystem.lcdPrint("clearow",0,3,"CONFIG INCOMPLETE");
     } 
     else {
-      sprinklersystem.lcdPrint("clearrow",0,3,"PROCESS COMPLETE");   
+      sprinklersystem.lcdPrint("clr",0,3,"PROCESS COMPLETE");   
       delay(1000);
       xTaskCreatePinnedToCore(mainPoll,"mainPolltask",1600,NULL,1,&mainPollhandle,1);     //132
       xTaskCreatePinnedToCore(everyMinute,"everyminutetask",2600,NULL,1,&everyminutehandle,1); //???
       xTaskCreatePinnedToCore(rotaryLoop,"rotaryLooptask",1800,NULL,1,&rotaryLoophandle,1);
-      everyMinute(nullptr);   
+      everyMinute(nullptr);      
     }   
   }  
 }
@@ -1274,7 +1237,7 @@ void facdefMonitor(void * parameter){
         sprinklersystem.lcdClearRow(1);
         sprinklersystem.lcdClearRow(3);
         sprinklersystem.lcdClearRow(2); 
-        sprinklersystem.lcdPrint("clearrow",0,2,"Defaulting unit!");
+        sprinklersystem.lcdPrint("clr",0,2,"Defaulting unit!");
         SPIFFS.remove("/network.cnf");
         SPIFFS.remove("/testresult.cnf");
         SPIFFS.remove("/testnetwork.cnf");
@@ -1285,7 +1248,7 @@ void facdefMonitor(void * parameter){
         sprinklersystem.lcdClearRow(1);
         sprinklersystem.lcdClearRow(2);
         sprinklersystem.lcdClearRow(3);     
-        sprinklersystem.lcdPrint("clearrow",0,3,"DEFAULTED!!!!");
+        sprinklersystem.lcdPrint("clr",0,3,"DEFAULTED!!!!");
         delay(2000);
         ESP.restart();
       }
@@ -1304,31 +1267,19 @@ void IRAM_ATTR readEncoderISR(){
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-TASK-[handlePowerFailureISR]------------------------------------------]
-//////////////////////////////////////////////////////////////////////////
-void IRAM_ATTR handlePowerFailureISR() {
-    if ((millis() - powerDebounceTime) > 200) {
-      powerFlag = true;
-      powerDebounceTime = millis();
-    }
-}
-//-----------------------------------------------------------------------]
-
-//////////////////////////////////////////////////////////////////////////
 //-SYSTEM-[setup]--------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void setup() {
   Serial.begin(115200);
   TaskHandle_t facdefhandle = NULL;
   pinMode(FACDEFPIN, INPUT_PULLUP);
-  pinMode(POWER_MONITOR_PIN,INPUT_PULLDOWN);
+//  pinMode(POWER_MONITOR_PIN, INPUT);
   sprinklersystem.begin();
   rotaryEncoder.setBoundaries(0,1000,false);
   rotaryEncoder.begin();
   rotaryEncoder.disableAcceleration();
 	rotaryEncoder.setup(readEncoderISR);
   xTaskCreatePinnedToCore(facdefMonitor,"facdeftask",2300,NULL,1,&facdefhandle,1);
-  attachInterrupt(POWER_MONITOR_PIN, handlePowerFailureISR, CHANGE);
   startup();
 }
 
@@ -1353,4 +1304,69 @@ void loop() {}
     //  Serial.printf("ARG[%s]: %s\n", request->argName(i).c_str(), request->arg(i).c_str());
     //}
 
+///////////////
+//while (file.available()) {
+//  Serial.write(file.read());
+//}
+//file.close();
+//file = SPIFFS.open("/system.cnf","r");
+/////////////  
+
+
+//sprinklersystem.database("PUT","{\"items\":[{\"age\":4,\"weight\":28}]}");
+//char* apiKey = "b0zp3p9m_msKLg4XNsfU2A3UUbSAVY7fTQPSPbbYH";
+//char* detaID = "b0zp3p9m";
+//char* detaBaseName = "esp32Irrigate";
+//connectDetabase(detaID, detaBaseName, apiKey,true);
+//Serial.print(detaObj.getBaseURI());
+//Serial.print(detaObj.getDetaID());
+
+  //printResult(detaObj.putObject("{\"items\":[{\"age\":4}]}"));
+  //Serial.println();
+  
+  //printResult(detaObj.getObject("cba"));
+  //Serial.println();
+ 
+  printResult(detaObj.deleteObject("abc"));
+  Serial.println();
+  printResult(detaObj.insertObject("{\"item\":{\"key\":\"cba\",\"age\":4}}"));
+  Serial.println();
+  printResult(detaObj.insertObject("{\"item\":{\"key\":\"abc\",\"age\":4}}"));
+  Serial.println();
+  printResult(detaObj.updateObject("{\"increment\":{\"age\":1}}", "abc"));
+  Serial.println();
+  printResult(detaObj.updateObject("{\"increment\":{\"age\":1}}", "bcs"));
+  Serial.println();
+  printResult(detaObj.query("{\"query\":[{\"age?lt\": 10}]}"));
+  Serial.println();
+
+
+
+//sprinklersystem.addDetabase(detaID,detaBaseName,apiKey);
+
+const char * tst = "{\"query\":[{\"meter": 666}]}";
+
+Serial.println(sprinklersystem.databaseQuery(tst));
+
+
+
+//dbtesting
+
+
+//sprinklersystem.database("QUERY","Age Query","{\"query\":[{\"value?gt\": 10}],\"limit\" : 50}");
+
+//DynamicJsonDocument receiving(1024);
+//deserializeJson(receiving, sprinklersystem.getDatabaseQuery("Age Query"));
+
+//JsonObject obj = receiving["items"][0].as<JsonObject>();
+//for (JsonPair p : obj) {
+//auto t = p.key(); // is a JsonString
+//const char* s = p.value(); 
+//Serial.print(t.c_str());Serial.print("-->");Serial.println("s");
+//}
+
+//const char * key = receiving["items"][0]["key"];
+//double meterval = receiving["items"][0]["value"];
+//Serial.println(key); Serial.print(" Meter is ");Serial.println(meterval);
+sprinklersystem.getDatabaseQuery("{\"query\":[{\"edtime?gt\": 1673305744,\"edtime?lt\": 1673392108}]}");
 */
