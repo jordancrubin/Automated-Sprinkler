@@ -8,142 +8,67 @@
         <meta name="author" content="Jordan Rubin" />
         <title>ESP32 Network Configuration Page</title>
         <link href="css/styles.css" rel="stylesheet" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/js/all.min.js" crossorigin="anonymous"></script>
+        <style>
+            #statusMessage { display: none; margin-top: 15px; padding: 10px; border-radius: 5px; }
+            .status-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+            .status-error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+            #spinner { display: none; }
+        </style>
     </head>
-    <body class="bg-primary" onload="updateWifiList();">
+    <body class="bg-light">
       <div id="wificonfigsetup">
         <div id="wifimain_content">
             <main>
               <div class="container">
                 <div class="row justify-content-center">
                     <div class="col-lg-5">
-                      <div class="card shadow-lg border-0 rounded-lg mt-5">
-                        <div class="card-header"><h3 class="text-center font-weight-light my-4">Wireless Network Configuration</h3></div>
-                        <div class="card-body">
-                          <div class="form-floating mb-3">
-                            <button type="button" id="refreshButton" onclick="updateWifiList()"> Refresh</button>
-                        </div> 
-                        <div class="form-floating mb-3">
-                          <select id="Wifilist" onchange="selectChange()">
-                          </select>
-                        </div>
-                        <div id = keySection> 
-                          <div class="form-floating mb-3">
-                            <div class="spinner-border text-primary" id="spinner" crole="status"></div>
-                          </div>
-                          <div class="form-floating mb-3">
-                            Key: <input type="password" id="keyfield" size="30" maxlength="30"><br>
-                            <input type="checkbox" onclick="showPass()">Show Password
-                          </div> 
-                          <div class="form-floating mb-3">
-                            <button type="button" id="connectButton" onclick="connectWifi()">Connect</button>
-                          </div> 
-                        </div>
-                        </div>
-                      </div>
-                    </div>
-                </div>
-              </div>
-      </main>
-  </div>
-</div>
-<script>
-/// connectWifi()  Connection request routine
-    function connectWifi(){
-       var dropdown = document.getElementById('Wifilist');
-       var spinner = document.getElementById('spinner');
-       spinner.style.display = 'block';
-       var ssid = dropdown.options[dropdown.selectedIndex].value;
-       var key = document.getElementById('keyfield').value;
-       var xhr = new XMLHttpRequest();
-       xhr.onreadystatechange = function() {
-       if (this.readyState == 4 && this.status == 200) {
-        console.log(this.responseText);
-        if (this.responseText == "RCVD"){
-          console.log("Check Success...");
-          var xhttp = new XMLHttpRequest();
-          xhttp.onreadystatechange = function() {
-            if (this.readyState == 4 && this.status == 200) {
-              if(this.responseText){
-                var message = 'Connection was a success.  The ESP32 is now on the wireless network. Wait about 10 seconds for your device to connect over to that network and click OK';
-                if (this.responseText == 'FAIL'){message = "Connection failed.  Bad password or SSID, Check that you are still connected to ESP32 and try again...";}
-                clearInterval(inspection);
-                spinner.style.display = 'none';
-                alert(message);
-                if (this.responseText == 'SUCCESS'){
-                 location.reload();
-                }
-              }           
-            }
-          };   
-          var inspection = setInterval(function(){  xhttp.open("GET", "checkStatus", true); 
-              xhttp.send();
-            }, 10000);     
-          }
-        }
-      }; 
-      xhr.open("POST", "connectwWifi", true);
-      xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-      xhr.send("ssidval="+ssid+"&keyval="+key+"");   
-    }
-
-/// selectChange()  Dynamic select box functions  
-    function selectChange() {
-      var dropdown = document.getElementById('Wifilist');
-      var keysect = document.getElementById('keySection');
-      var key = document.getElementById('keyfield');
-      key.value = "";
-      console.log(dropdown.selectedIndex);
-      if (dropdown.selectedIndex == 0){
-        keysect.style.display = 'none';
-      }
-      else {
-        keysect.style.display = 'block';
-      }   
-    }
-
-///showPass()  show or hide password field
-    function showPass() {
-      var x = document.getElementById("keyfield");
-      if (x.type === "password") {
-        x.type = "text";
-      } 
-      else {
-        x.type = "password";
-      }
-    } 
-
-/// updateWifilist()  Dynamic refresh of SSIDs  
-    function updateWifiList() {
-      var dropdown = document.getElementById('Wifilist');
-      var keysect = document.getElementById('keySection');
-      var spinner = document.getElementById('spinner');
-      spinner.style.display = 'none';
-      keysect.style.display = 'none';     
-      var option;
-      dropdown.length = 0;
-      defaultOption = document.createElement('option');
-      defaultOption.text = "Refreshing network list";
-      dropdown.add(defaultOption);
-      var xhr = new XMLHttpRequest();
-      xhr.onreadystatechange = function() {
-        if (this.readyState == 4 && this.status == 200) {
-          var data = JSON.parse(this.responseText);
-          dropdown.length = 0;
-          defaultOption = document.createElement('option');
-          defaultOption.text = 'Choose a network.....';
-          dropdown.add(defaultOption);
-          dropdown.selectedIndex = 0;
-          for (let i = 0; i < data.length; i++) {
-            option = document.createElement('option');
-            option.text = data[i].name;
-            option.value = data[i].val;
-            dropdown.add(option);
-          }
-        }
-      };  
-      xhr.open("GET", "getWifiList", true);
-      xhr.send();
-    }
-  </script>
-  </body>
+                         <div class="card shadow-lg border-0 rounded-lg mt-5">
+                             <div class="card-header">
+                                 <h3 class="text-center font-weight-light my-4">
+                                     <i class="fas fa-wifi me-2"></i>Sprinkler32 Network Configuration
+                                 </h3>
+                             </div>
+                             <div class="card-body">
+                                 <div class="row mb-3">
+                                     <div class="col-9">
+                                         <div class="form-floating">
+                                             <select id="Wifilist" class="form-select"></select>
+                                             <label for="Wifilist">Available Networks</label>
+                                         </div>
+                                     </div>
+                                     <div class="col-3 d-grid">
+                                         <button type="button" id="refreshButton" class="btn btn-secondary">Refresh</button>
+                                     </div>
+                                 </div>
+ 
+                                 <div id="keySection" style="display: none;">
+                                     <div class="form-floating mb-3">
+                                         <input type="password" id="keyfield" class="form-control" placeholder="Password" />
+                                         <label for="keyfield">Password</label>
+                                     </div>
+                                     <div class="form-check mb-3">
+                                         <input class="form-check-input" type="checkbox" id="showPassword">
+                                         <label class="form-check-label" for="showPassword">Show Password</label>
+                                     </div>
+                                     <div class="d-grid">
+                                         <button type="button" id="connectButton" class="btn btn-primary">
+                                             <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                             <span class="button-text">Connect</span>
+                                         </button>
+                                     </div>
+                                 </div>
+                                 <div class="text-center mt-3">
+                                     <div id="statusMessage"></div>
+                                 </div>
+                            </div>
+                         </div>
+                     </div>
+                 </div>
+               </div>
+             </main>
+         </div>
+     </div>
+     <script src="js/cfg_scripts.js"></script>
+   </body>
 </html>

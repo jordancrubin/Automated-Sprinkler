@@ -7,11 +7,11 @@
         <meta name="description" content="ESP 32 Irrigation Initial Configuration" />
         <meta name="author" content="Jordan Rubin" />
         <title>Configuration - RubinTech</title>
-        <link href="https://cdn.jsdelivr.net/npm/simple-datatables@latest/dist/style.css" rel="stylesheet" />
         <link href="css/styles.css" rel="stylesheet" />
         <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/js/all.min.js" crossorigin="anonymous"></script>
         <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
         <script src="js/scripts.js"></script>
+        <script src="js/timezone.js"></script>
         <script>
             var progOb = {};
             cookieChk();
@@ -24,14 +24,14 @@
             $(document).ready(function () {
             $("#addrow").on("click", function () {
               if(counter==9){return;}  
-        // Adding a row inside the tbody.
-        $('#zonebody').append(`<tr id="R${++rowIdx}">
-          <td><input type="text" class="form-control" id="zonePort${counter}" size="2" maxlength="2" name="zonePort${counter}"></td>
-          <td><input type="text" class="form-control" id="zoneName${counter}" maxlength="19" name="zoneName${counter}"/></td>
-          <td><input type="text" class="form-control" id="zoneDesc${counter}" name="zoneDesc${counter}"/></td>
-          <td><input type="button" class="ibtnDel btn btn-md btn-danger" value="Delete"></td>`);
-          counter++;
-      });
+                // Adding a row inside the tbody.
+                $('#zonebody').append('<tr id="R' + (++rowIdx) + '">' +
+                '<td><input type="number" class="form-control" id="zonePort' + counter + '" min="1" max="16" name="zonePort' + counter + '"></td>' +
+                '<td><input type="text" class="form-control" id="zoneName' + counter + '" maxlength="19" name="zoneName' + counter + '"/></td>' +
+                '<td><input type="text" class="form-control" id="zoneDesc' + counter + '" name="zoneDesc' + counter + '"/></td>' +
+                '<td><input type="button" class="ibtnDel btn btn-md btn-danger" value="Delete"></td></tr>');
+                counter++;
+            });
         $("table.order-list").on("click", ".ibtnDel", function (event) {
         var child = $(this).closest('tr').nextAll();
         //var ct =1;
@@ -57,7 +57,7 @@
           document.getElementById('zoneName'+subdig).name = 'zoneName'+subdig;
           document.getElementById('zoneDesc'+dig).id = 'zoneDesc'+subdig; 
           document.getElementById('zoneDesc'+subdig).name = 'zoneDesc'+subdig;          
-          $(this).attr('id', `R${dig - 1}`);
+          $(this).attr('id', 'R' + (dig - 1));
         });
         $(this).closest('tr').remove();
         rowIdx--;      
@@ -65,120 +65,172 @@
           });
         });
     //******    
-    function submitConfig(){
-        let err = [];
-        let gpios = [];
-        let zones = [];
-        let znames = [];
-        var wkflw = {};
-        var duplicates = '';
-        var msg = '';
-        a = document.getElementById("adminpass1").value; wkflw.pass = a;
-        b = document.getElementById("adminpass2").value;
-        c = document.getElementById("meterGpio").value; gpios.push(c);  wkflw.mtrio = c;
-        if (document.getElementById("meterMeasureL").checked == true){w="l";}
-        else {w="g";}
-        wkflw.meas = w;
-        r = document.getElementById("meterdebounce").value; wkflw.mtrdeb = r;
-        s = document.getElementById("meterinc").value; wkflw.mtrinc = s;
-        d = document.getElementById("valveOpenGpio").value; gpios.push(d); wkflw.valopio = d;
-        e = document.getElementById("valveCloseGpio").value; gpios.push(e); wkflw.valclio = e;
-        f = document.getElementById("valveRelayGpio").value; gpios.push(f); wkflw.valrlyio = f;
-        j = document.getElementById("rainSenseGpio").value; gpios.push(j); wkflw.rainsens = j;
-        k = document.getElementById("Detaname").value; wkflw.detaname = k;
-        l = document.getElementById("DetaId").value; wkflw.detaid = l;
-        m = document.getElementById("DetaApiKey").value; wkflw.detaapikey = m;
+function submitConfig() {
+    let err = [];
+    let gpios = [];
+    let zones = [];
+    let znames = [];
+    var wkflw = {};
+    var duplicates = '';
+    var msg = '';
+    a = document.getElementById("adminpass1").value; wkflw.pass = a;
+    b = document.getElementById("adminpass2").value;
+    c = document.getElementById("meterGpio").value; gpios.push(c); wkflw.mtrio = c;
+    if (document.getElementById("meterMeasureL").checked == true) { w = "l"; }
+    else { w = "g"; }
+    wkflw.meas = w;
+    r = document.getElementById("meterdebounce").value; wkflw.mtrdeb = r;
+    s = document.getElementById("meterinc").value; wkflw.mtrinc = s;
+    d = document.getElementById("valveOpenGpio").value; gpios.push(d); wkflw.valopio = d;
+    e = document.getElementById("valveCloseGpio").value; gpios.push(e); wkflw.valclio = e;
+    f = document.getElementById("valveRelayGpio").value; gpios.push(f); wkflw.valrlyio = f;
+    j = document.getElementById("rainSenseGpio").value; gpios.push(j); wkflw.rainsens = j;
+    k = document.getElementById("firebase_url").value; wkflw.firebase_database_url = k;
+    l = document.getElementById("firebase_secret").value; wkflw.firebase_database_secret = l;
+    wkflw.weather_api_key = document.getElementById("weather_api_key").value;
+    wkflw.weather_location = document.getElementById("weather_location").value;
+    wkflw.rain_chance_cutoff = document.getElementById("rain_chance_cutoff").value;
 
-        if (((k)&&(!l)) || ((k)&&(!m))) {
-          err.push('The detabase info is only partially filled out.');
-        } 
+    if ((k && !l) || (!k && l)) {
+        err.push('The Firebase info is only partially filled out.');
+    }
 
-        wkflw.zones = zones;
-        if (a!=b){err.push('The admin password did not match the re-typed password.');}
-        if (cnftype ==1){
-          if(a.length < 8){err.push('The admin password must be a minimum of 8 characters.');}
+    if (a != b) { err.push('The admin password did not match the re-typed password.'); }
+    if (cnftype == 1) {
+        if (a.length < 8) { err.push('The admin password must be a minimum of 8 characters.'); }
+    }
+    var sel = document.getElementById("timezone");
+    var opt = sel.options[sel.selectedIndex];
+    t = opt.value; wkflw.timez = t;
+    tn = opt.text; wkflw.timezname = tn;
+    if (!t) { err.push('A timezone must be choosen.'); }
+    if ((c < 1) || (c > 40)) { err.push('The Meter GPIO value is out of bounds.'); }
+    if ((d < 1) || (d > 40)) { err.push('The Valve Open GPIO value is out of bounds.'); }
+    if ((e < 1) || (e > 40)) { err.push('The Valve Closed value is out of bounds.'); }
+    if ((f < 1) || (f > 40)) { err.push('The Valve Relay value is out of bounds.'); }
+    if ((r < 5) || (r > 999)) { err.push('Meter debounce [ms] is beyond params'); }
+    if (j) {
+        if ((j < 1) || (j > 40)) { err.push('The Rain Sensor GPIO value is out of bounds.'); }
+    }
+    if (!s) { err.push('Meter Increment should be the flwo value of each pulse'); }
+    var inc = 1;
+    for (var z = 1; z < counter; z++) {
+        let thiszone = [];
+        g = document.getElementById("zonePort" + z).value; thiszone.push(g);
+        h = document.getElementById("zoneName" + z).value; thiszone.push(h); znames.push(h);
+        i = document.getElementById("zoneDesc" + z).value; thiszone.push(i);
+        if (cnftype == 1) { thiszone.push(0); thiszone.push(0); thiszone.push(0); }
+        else {
+            if (typeof progOb[z] != "undefined") { thiszone.push(progOb[z].A); } else { thiszone.push(0); }
+            if (typeof progOb[z] != "undefined") { thiszone.push(progOb[z].B); } else { thiszone.push(0); }
+            if (typeof progOb[z] != "undefined") { thiszone.push(progOb[z].C); } else { thiszone.push(0); }
         }
-        var sel = document.getElementById("timezone");
-        var opt = sel.options[sel.selectedIndex];
-        t = opt.value; wkflw.timez = t;
-        tn = opt.text; wkflw.timezname = tn;
-        if (!t){err.push('A timezone must be choosen.');}
-        if ((c<1) || (c>40)) {err.push('The Meter GPIO value is out of bounds.');} 
-        if ((d<1) || (d>40)) {err.push('The Valve Open GPIO value is out of bounds.');} 
-        if ((e<1) || (e>40)) {err.push('The Valve Closed value is out of bounds.');} 
-        if ((f<1) || (f>40)) {err.push('The Valve Relay value is out of bounds.');} 
-        if ((r<5) || (r>999)) {err.push('Meter debounce [ms] is beyond params');}
-        if (j){
-          if ((j<1) || (j>40)) {err.push('The Rain Sensor GPIO value is out of bounds.');} 
+        zones.push(thiszone);
+        if (!/^\d+$/.test(g)) {
+            err.push('The Zone [' + z + '] Port must be a numeric value.');
+        } else {
+            var portNum = parseInt(g, 10);
+            if (portNum < 1 || portNum > 16) { err.push('The Zone [' + z + '] Port value must be between 1 and 16.'); }
         }
-        if (!s) {err.push('Meter Increment should be the flwo value of each pulse');}
-        var inc = 1;
-        for (var z = 1; z < counter; z++) {
-            let thiszone = [];
-            g= document.getElementById("zonePort"+z).value; thiszone.push(g);
-            h= document.getElementById("zoneName"+z).value; thiszone.push(h); znames.push(h);
-            i= document.getElementById("zoneDesc"+z).value; thiszone.push(i);
-            if (cnftype == 1){thiszone.push(0);thiszone.push(0);thiszone.push(0);}    
-            else {
-              if (typeof progOb[z] != "undefined") {thiszone.push(progOb[z].A); console.log(progOb[z].A);} 
-               else {thiszone.push(0);}
-               if (typeof progOb[z] != "undefined") {thiszone.push(progOb[z].B); console.log(progOb[z].B);} 
-               else {thiszone.push(0);}
-               if (typeof progOb[z] != "undefined") {thiszone.push(progOb[z].C); console.log(progOb[z].C);} 
-               else {thiszone.push(0);}
-           }
-            wkflw.zones.push(thiszone);
-            if ((g<1) || (g>16)) {err.push('The Zone ['+z+'] Port value is out of bounds.');} 
-            if ((h.length==0)||(h.length>30)){err.push('The Zone ['+z+'] requires a name not to exceed 30 chars.');}  
-            if ((h.length==0)||(h.length>70)){err.push('The Zone ['+z+'] requires a description not to exceed 70 chars.');}  
-            inc++;   
+        if (h.length === 0 || h.length > 30) { err.push('The Zone [' + z + '] requires a name not to exceed 30 chars.'); }
+        if (i.length === 0 || i.length > 70) { err.push('The Zone [' + z + '] requires a description not to exceed 70 chars.'); }
+        inc++;
+    }
+    const gpiosort = [...gpios].sort()
+    for (let z = 0; z < gpiosort.length; z++) {
+        if (gpiosort[z + 1] === gpiosort[z]) {
+            duplicates += '[' + gpiosort[z] + ']';
         }
-        const gpiosort = [...gpios].sort()
-        for (let z = 0; z < gpiosort.length; z++) {
-            if (gpiosort[z + 1] === gpiosort[z]) {
-                duplicates+='['+gpiosort[z]+']';
-            }
+    }
+    if (duplicates.length > 0) { err.push('Duplicate GPIO values are found in this config ' + duplicates); }
+    err.forEach(function (item, index, array) {
+        msg += item + '<BR>';
+    })
+    duplicates = '';
+    const znamesort = [...znames].sort()
+    for (let z = 0; z < znamesort.length; z++) {
+        if (znamesort[z + 1] === znamesort[z]) {
+            duplicates += '[' + znamesort[z] + ']';
         }
-        if(duplicates.length>0){err.push('Duplicate GPIO values are found in this config ' +duplicates);}
-        err.forEach(function(item, index, array) {
-            msg+=item+'<BR>';
-        })
-        duplicates = '';
-        const znamesort = [...znames].sort()
-        for (let z = 0; z < znamesort.length; z++) {
-            if (znamesort[z + 1] === znamesort[z]) {
-                duplicates+='['+znamesort[z]+']';
-            }
-        }
-        if(duplicates.length>0){err.push('Duplicate zone names are found in this config ' +duplicates);}
-        err.forEach(function(item, index, array) {
-            msg+=item+'<BR>';
-        })
-        if (err.length==0){
-            console.log('NO ERRORS');
-            var xhr = new XMLHttpRequest();
-            xhr.onreadystatechange = function() {
-            if (this.readyState == 4 && this.status == 200) {
-                var data = JSON.parse(this.responseText);
-                if (data.s == "0"){
-                  alert("System updated, device will reboot with changes...");
-                  window.location.href = "login.html";
+    }
+    if (duplicates.length > 0) { err.push('Duplicate zone names are found in this config ' + duplicates); }
+    err.forEach(function (item, index, array) {
+        msg += item + '<BR>';
+    })
+    if (err.length == 0) {
+        console.log('NO ERRORS');
+        const btn = document.getElementById('submitConfigBtn');
+        const spinner = btn.querySelector('.spinner-border');
+        const text = btn.querySelector('.button-text');
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        text.style.display = 'none';
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+            if (this.readyState == 4) {
+                if (this.status == 200) {
+                    try {
+                        var returndata = JSON.parse(this.responseText);
+                        if (returndata.s == "0") {
+                            // System config successful, now send zones
+                            setTimeout(function() {
+                            var zoneData = { zones: zones };
+                            var xhz = new XMLHttpRequest();
+                            xhz.onreadystatechange = function () {
+                                if (this.readyState == 4) {
+                                    if (this.status == 200) {
+                                        try {
+                                            var zres = JSON.parse(this.responseText);
+                                            if (zres.s == "0") {
+                                                alert("System updated. Device is rebooting. You will be redirected automatically when it comes back online.");
+                                                waitForReboot("login.html");
+                                            } else {
+                                                throw new Error("Server returned error on zone update.");
+                                            }
+                                        } catch (e) {
+                                            alert("Error parsing zone update response: " + this.responseText);
+                                            btn.disabled = false;
+                                            spinner.style.display = 'none';
+                                            text.style.display = 'inline-block';
+                                        }
+                                    } else {
+                                        alert("Error submitting zone configuration: " + this.status);
+                                        btn.disabled = false;
+                                        spinner.style.display = 'none';
+                                        text.style.display = 'inline-block';
+                                    }
+                                }
+                            };
+                            xhz.open("POST", "updateConfig", true);
+                            xhz.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                            xhz.send("testval=" + encodeURIComponent(JSON.stringify(zoneData)) + "&filetype=zones");
+                            }, 500);
+                        } else {
+                            throw new Error("Server returned error on system config update.");
+                        }
+                    } catch (e) {
+                        alert("Error parsing system config response: " + this.responseText);
+                        btn.disabled = false;
+                        spinner.style.display = 'none';
+                        text.style.display = 'inline-block';
+                    }
+                } else {
+                    alert("Error submitting system configuration: " + this.status);
+                    btn.disabled = false;
+                    spinner.style.display = 'none';
+                    text.style.display = 'inline-block';
                 }
-                else {
-                  alert("Update error, device wil reboot, try again...");
-                  window.location.href = "login.html";
-                }
             }
-        };  
-      var jsonstr = JSON.stringify(wkflw);
-      console.log(jsonstr);
-      xhr.open("POST", "updateConfig", true);
-      xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-      xhr.send("testval="+jsonstr+"&filetype=cfg"); 
+        };
+        var jsonstr = JSON.stringify(wkflw);
+        console.log(jsonstr);
+        xhr.open("POST", "updateConfig", true);
+        xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+        xhr.send("testval=" + encodeURIComponent(jsonstr) + "&filetype=cfg&norestart=true");
     }
     document.getElementById('errorContent').innerHTML = msg;
-    if (err.length !=0){
-      $("#infoModalCenter").modal("toggle");
+    if (err.length != 0) {
+        $("#infoModalCenter").modal("toggle");
     }
 }
 //*******
@@ -211,28 +263,39 @@ function getConf(){
                 document.getElementById("valveOpenGpio").value = data.valopio;
                 document.getElementById("valveCloseGpio").value = data.valclio;
                 document.getElementById("valveRelayGpio").value = data.valrlyio;
-                var counter =1;
-                data.zones.forEach(function(zone) {
-                  if (counter !=1){
-                    $("#addrow").triggerHandler("click");
+                if (data.rainsens){
+                  document.getElementById("rainSenseGpio").value = data.rainsens;
+                }
+                if (data.firebase_database_url){
+                  document.getElementById("firebase_url").value = data.firebase_database_url;
+                  document.getElementById("firebase_secret").value = data.firebase_database_secret;
+                }
+                if (data.weather_api_key) document.getElementById("weather_api_key").value = data.weather_api_key;
+                if (data.weather_location) document.getElementById("weather_location").value = data.weather_location;
+                if (data.rain_chance_cutoff) document.getElementById("rain_chance_cutoff").value = data.rain_chance_cutoff;
+                
+                // Fetch Zones separately
+                var xhz = new XMLHttpRequest();
+                xhz.open("POST", "getConf", true);
+                xhz.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                xhz.send("filetype=zones");
+                xhz.onreadystatechange = function() {
+                  if (this.readyState == 4 && this.status == 200) {
+                    var zdata = JSON.parse(this.responseText);
+                    var counter =1;
+                    zdata.zones.forEach(function(zone) {
+                      if (counter !=1){ $("#addrow").triggerHandler("click"); }
+                      document.getElementById("zonePort"+counter).value = zone[0];
+                      document.getElementById("zoneName"+counter).value = zone[1];
+                      document.getElementById("zoneDesc"+counter).value = zone[2]; 
+                      progOb[counter] = {};
+                      progOb[counter].A = zone[3];
+                      progOb[counter].B = zone[4];
+                      progOb[counter].C = zone[5];
+                      counter++;
+                    });
                   }
-                  document.getElementById("zonePort"+counter).value = zone[0];
-                  document.getElementById("zoneName"+counter).value = zone[1];
-                  document.getElementById("zoneDesc"+counter).value = zone[2]; 
-                  if (data.rainsens){
-                    document.getElementById("rainSenseGpio").value = data.rainsens;
-                  }
-                  if (data.detaname){
-                    document.getElementById("Detaname").value = data.detaname;
-                    document.getElementById("DetaId").value = data.detaid;
-                    document.getElementById("DetaApiKey").value = data.detaapikey;
-                  }
-                  progOb[counter] = {};
-                  progOb[counter].A = zone[3];
-                  progOb[counter].B = zone[4];
-                  progOb[counter].C = zone[5];
-                  counter++;
-                });
+                };
             }
         };
       xhr.open("POST", "getConf", true);
@@ -244,7 +307,9 @@ function getConf(){
     <body class="sb-nav-fixed">
         <nav class="sb-topnav navbar navbar-expand navbar-dark bg-dark">
             <!-- Navbar Brand-->
-            <a class="navbar-brand ps-3" href="/configure.html">ESP Irrigate</a>
+            <a class="navbar-brand ps-3" href="/configure.html"><i class="fas fa-faucet me-2"></i>ESP Irrigate</a>
+            <!-- Sidebar Toggle-->
+            <button class="btn btn-link btn-sm order-1 order-lg-0 me-4 me-lg-0" id="sidebarToggle" href="#!"><i class="fas fa-bars"></i></button>
             <!-- Navbar Search -->
             <form class="d-none d-md-inline-block form-inline ms-auto me-0 me-md-3 my-2 my-md-0">
             </form>
@@ -272,229 +337,246 @@ function getConf(){
       </div>
     </div>
   </div>
-                    <div class="container-fluid px-4">
-                    <div id="page-wrapper">
-                        <div class="row">
-                          <div class="col-lg-12" id="title">
-                            <h1>Initial Configuration</h1>
-                          </div>
-                        </div><!-- /.row -->
-                        <div class="row">
-                          <div class="col-xs-4 col-md-6">
-                            <div class="alert alert-info" id="pwinfo">
-                              Replace the default admin password with your own, at least 8 characters.
-                            </div>
-                          </div>
-                        </div>                         
-                        <div class="row">
-                        <div class="col-xs-4 col-md-3">
-                            <div class="form-group">
-                             <!-- <form>-->
-                                <div class="form-group">
-                                  <label for="exampleInputEmail1">Admin Password</label>
-                                  <input type="password" class="form-control" id="adminpass1" name="adminpass1" placeholder="Password" value="11111111">
-                                </div>
-                                <div class="form-group">
-                                  <label for="exampleInputPassword1">Retype Password</label>
-                                  <input type="password" class="form-control" id="adminpass2" name="adminpass2" placeholder="Password" value="11111111">
-                                </div>
-                              </div>
-                            </div>
-                        </div>
-                      </br></br>
+  <!-- OWM Info Modal -->
+  <div class="modal fade" id="owmInfoModal" tabindex="-1" aria-labelledby="owmInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="owmInfoModalLabel">OpenWeatherMap API Key</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>The OpenWeatherMap (OWM) API Key is required to fetch local weather data and forecast information. This allows the system to display current conditions and intelligently delay sprinkler runs based on the chance of rain.</p>
+          <p>You can get a free API key by signing up at <a href="https://openweathermap.org/" target="_blank">openweathermap.org</a>.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Rain Cutoff Info Modal -->
+  <div class="modal fade" id="rainCutoffInfoModal" tabindex="-1" aria-labelledby="rainCutoffInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="rainCutoffInfoModalLabel">Rain Cutoff Percentage</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>This setting determines the threshold for the "Chance of Rain" forecast that will trigger a rain delay.</p>
+          <p>If the OpenWeatherMap forecast predicts a probability of precipitation (POP) greater than or equal to this value for the next 24 hours, the system will automatically skip scheduled runs to conserve water.</p>
+          <p>Default is 75%.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Location Info Modal -->
+  <div class="modal fade" id="locationInfoModal" tabindex="-1" aria-labelledby="locationInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="locationInfoModalLabel">Weather Location</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>Enter your location to fetch local weather data. This is used to determine if scheduled runs should be skipped due to rain.</p>
+          <p><strong>Format:</strong> City,CountryCode (ISO 3166)</p>
+          <p><strong>Examples:</strong><br>
+          London,UK<br>
+          Paris,FR<br>
+          New York,NY,US</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Firebase Info Modal -->
+  <div class="modal fade" id="firebaseInfoModal" tabindex="-1" aria-labelledby="firebaseInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="firebaseInfoModalLabel">Firebase Configuration</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>Firebase Realtime Database is used to store historical data, logs, and water usage metrics in the cloud.</p>
+          <p><strong>Firebase URL:</strong> The URL of your Realtime Database (e.g., https://your-project.firebaseio.com).</p>
+          <p><strong>Firebase Secret:</strong> The database secret (Legacy Token) found in Project Settings > Service Accounts > Database Secrets.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Port Info Modal -->
+  <div class="modal fade" id="portInfoModal" tabindex="-1" aria-labelledby="portInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="portInfoModalLabel">Zone Port Configuration</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>The <strong>Port</strong> corresponds to the specific output pin on the PF575 I2C GPIO Expander board used to control the solenoid for this zone.</p>
+          <p><strong>Valid Range:</strong> 1 through 16.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+                    <div class="container-fluid px-4 mt-4">
+                        <h1 class="mt-4" id="title">Initial Configuration</h1>
+                        <div class="alert alert-info" id="pwinfo">Replace the default admin password with your own, at least 8 characters.</div>
 
+                        <!-- Admin Password Card -->
+                        <div class="card mb-4">
+                            <div class="card-header"><i class="fas fa-key me-1"></i>Admin Password</div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-floating mb-3">
+                                            <input type="password" class="form-control" id="adminpass1" name="adminpass1" placeholder="Password">
+                                            <label for="adminpass1">New Admin Password</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-floating mb-3">
+                                            <input type="password" class="form-control" id="adminpass2" name="adminpass2" placeholder="Password">
+                                            <label for="adminpass2">Retype Password</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
-                      <div class="row">              
-                        <div class="col-xs-4 col-md-6">
-                          <div class="alert alert-info">
-                            Deta Analitical Storage at  <a href="https://web.deta.sh" target="_blank">deta.sh account creation</a>
-                          </div>
-                        </div>
-                      </div> 
-                      <div class="row">
-                        <div class="col-xs-4 col-md-3">
-                          <div class="form-group">
-                           <!-- <form>-->
-                              <div class="form-group">
-                                <label for="exampleInputEmail1">Detabase Name</label>
-                                <input type="text" class="form-control" id="Detaname" placeholder="Mydetabasename" value="esp32Irrigate">
-                              </div>
-                              <div class="form-group">
-                                <label for="exampleInputPassword1">Deta ID</label>
-                                <input type="text" class="form-control" id="DetaId" placeholder="q9xa4ta7" value="b0zp3p9m">
-                              </div>
-                              <div class="form-group">
-                                <label for="exampleInputPassword1">API Key</label>
-                                <input type="text" class="form-control" id="DetaApiKey" placeholder="q9xa4ta7_lrWTr2QWasY5Z6YTEaBYe8qCTXTZuVMT" value="b0zp3p9m_AkusYFneqH2YqsKPwEYqZP9AGBxh4Eig">
-                              </div>
-                            </div>
-                          </div>
-                      </div>
-                    </br></br>
-                        <div class="row">
-                          <div class="col-xs-4 col-md-6">
-                            <div class="alert alert-info">
-                              Meter Configuration
-                            </div>
-                          </div>
-                        </div>           
-                        <div class="row">
-                          <div class="col-xs-4 col-md-2">
-                              <div class="form-group">
-                                <form>
-                                  <div class="form-group">
-                                    <label>GPIO Pin</label>
-                                    <input type="text" class="form-control" id="meterGpio" size="2" maxlength="2" placeholder="15" value="15">
-                                  </div>
-                               </div>     
-                            </div>            
-                                <div class="col-xs-4 col-md-2">
-                                  <div class="form-group">
-                                    <label>Measurement</label></div><div>
-                                    <label class="radio-inline">
-                                      <input type="radio" name="meterMeasure" id="meterMeasureG" value="g" checked="checked"> Gallons
-                                    </label>
-                                    <label class="radio-inline">
-                                      <input type="radio" name="meterMeasure" id="meterMeasureL" value="l"> Litres
-                                    </label>
-                                  </div>
-                                </div>
-                                <div class="col-xs-4 col-md-2">
-                                  <div class="form-group">
-                                    <label>Debounce Delay mS</label></div><div>
-                                      <input type="text" class="form-control" id="meterdebounce" size="3" maxlength="3" value="200">
-                                  </div>
-                                </div>
-                                <div class="row"> 
-                                <div class="col-xs-4 col-md-2">
-                                  <div class="form-group">
-                                    <label>Increment of pulse</label></div><div>
-                                      <input type="text" class="form-control" id="meterinc" size="3" maxlength="3" value=".1">
-                                  </div>
-                                </div>
-                              </div>
-                        </div>
-                      </br></br>
-                        <div class="row">              
-                          <div class="col-xs-4 col-md-6">
-                            <div class="alert alert-info">
-                              Valve Configuration
-                            </div>
-                          </div>
-                        </div> 
-                        <div class="row">
-                          <div class="col-xs-4 col-md-2">
-                              <div class="form-group">
-                                <form>
-                                  <div class="form-group">
-                                    <label>Open GPIO</label>
-                                    <input type="text" class="form-control" id="valveOpenGpio" size="2" maxlength="2" placeholder="17" value="17">
-                                  </div>
-                               </div>  
-                           </div>
-                              <div class="col-xs-4 col-md-2">
-                                  <div class="form-group">
-                                    <label>Close GPIO</label>
-                                    <input type="text" class="form-control" id="valveCloseGpio" size="2" maxlength="2" placeholder="12" value="12">
-                                  </div>
-                              </div>
-                              <div class="col-xs-4 col-md-2">
-                                <div class="form-group">
-                                  <label>Relay GPIO</label>
-                                  <input type="text" class="form-control" id="valveRelayGpio" size="2" maxlength="2" placeholder="16" value="16">
+                        <!-- Firebase Configuration Card -->
+                        <div class="card mb-4">
+                            <div class="card-header"><i class="fas fa-database me-1"></i>Firebase Configuration</div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-floating mb-3">
+                                            <input type="text" class="form-control" id="firebase_url" placeholder="https://your-project.firebaseio.com">
+                                            <label for="firebase_url">Firebase URL <a href="#" class="text-decoration-none text-muted" data-bs-toggle="modal" data-bs-target="#firebaseInfoModal" style="pointer-events: auto;"><i class="fas fa-question-circle fa-sm"></i></a></label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-floating mb-3">
+                                            <input type="text" class="form-control" id="firebase_secret" placeholder="Database Secret">
+                                            <label for="firebase_secret">Firebase Secret <a href="#" class="text-decoration-none text-muted" data-bs-toggle="modal" data-bs-target="#firebaseInfoModal" style="pointer-events: auto;"><i class="fas fa-question-circle fa-sm"></i></a></label>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </br></br>
-                        <div class="row">              
-                          <div class="col-xs-4 col-md-6">
-                            <div class="alert alert-info">
-                              System Configuration
-                            </div>
-                          </div>
-                        </div> 
-                        <div class="row">
-                          <div class="col-xs-4 col-md-2">
-                              <div class="form-group">
-                                <form>
-                                  <div class="form-group">
-                                    <label>Time Zone</label><br>
-                                    <select class="selectpicker" id="timezone"><option value=""SELECTED>Choose one</option></select>
-                                  </div>
-                               </div>  
-                           </div>
-                              <div class="col-xs-4 col-md-2">
-                                  <div class="form-group">
-                                    <label>Rain Sensor GPIO</label>
-                                    <input type="text" class="form-control" id="rainSenseGpio" size="2" maxlength="2" placeholder="2" value="2">
-                                  </div>
-                              </div>
-                              <div class="col-xs-4 col-md-2">
-                                <div class="form-group">
-                                  <label>Future use</label>
-                                  <input type="text" class="form-control" id="futureGpio" size="0" maxlength="0">
+
+                        <!-- Meter and Valve Card -->
+                        <div class="card mb-4">
+                            <div class="card-header"><i class="fas fa-cogs me-1"></i>Hardware Configuration</div>
+                            <div class="card-body">
+                                <h5 class="card-title">Meter Configuration</h5>
+                                <div class="row">
+                                    <div class="col-md-3"><div class="form-floating mb-3"><input type="text" class="form-control" id="meterGpio" size="2" maxlength="2" placeholder="15" value="15"><label for="meterGpio">Meter GPIO</label></div></div>
+                                    <div class="col-md-3"><div class="form-floating mb-3"><input type="text" class="form-control" id="meterdebounce" size="3" maxlength="3" value="200"><label for="meterdebounce">Debounce (ms)</label></div></div>
+                                    <div class="col-md-3"><div class="form-floating mb-3"><input type="text" class="form-control" id="meterinc" size="3" maxlength="3" value=".1"><label for="meterinc">Increment/Pulse</label></div></div>
+                                    <div class="col-md-3 align-self-center">
+                                        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="meterMeasure" id="meterMeasureG" value="g" checked="checked"><label class="form-check-label" for="meterMeasureG">Gallons</label></div>
+                                        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="meterMeasure" id="meterMeasureL" value="l"><label class="form-check-label" for="meterMeasureL">Litres</label></div>
+                                    </div>
+                                </div>
+                                <hr>
+                                <h5 class="card-title">Valve Configuration</h5>
+                                <div class="row">
+                                    <div class="col-md-4"><div class="form-floating mb-3"><input type="text" class="form-control" id="valveOpenGpio" size="2" maxlength="2" placeholder="17" value="17"><label for="valveOpenGpio">Open GPIO</label></div></div>
+                                    <div class="col-md-4"><div class="form-floating mb-3"><input type="text" class="form-control" id="valveCloseGpio" size="2" maxlength="2" placeholder="12" value="12"><label for="valveCloseGpio">Close GPIO</label></div></div>
+                                    <div class="col-md-4"><div class="form-floating mb-3"><input type="text" class="form-control" id="valveRelayGpio" size="2" maxlength="2" placeholder="16" value="16"><label for="valveRelayGpio">Relay GPIO</label></div></div>
                                 </div>
                             </div>
                         </div>
-                            </form>
-                          </div>
-                    </br></br>
-                    <div class="row">
-                      <div class="col-xs-4 col-md-6">
-                        <div class="alert alert-info">
-                          Zone configuration
-                        </div>
-                      </div>
-                    </div> 
-                    <div class="row">
-                        <div class="col-xs-4 col-md-6">
-                            <div class="form-group">
-                              <form>
-                                <div class="form-group">
-                                    <table id="myTable" class=" table order-list">
-                                        <thead>
-                                            <tr>
-                                                <td>Port</td>
-                                                <td>Name</td>
-                                                <td>Description</td>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="zonebody">
-                                            <tr id="R1">
-                                                <td class="col-sm-1">
-                                                    <input type="text" class="form-control" id="zonePort1" size="2" maxlength="2">
-                                                </td>
-                                                <td class="col-sm-2">
-                                                    <input type="text" name="zoneName1" id="zoneName1" class="form-control" maxlength="20"/>
-                                                </td>
-                                                <td class="col-sm-5">
-                                                    <input type="text" name="zoneDesc1" id="zoneDesc1" class="form-control"/>
-                                                </td>
-                                                <td class="col-sm-2"><a class="deleteRow"></a>                            
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                        <tfoot>
-                                            <tr>
-                                                <td colspan="2" style="text-align: left;">
-                                                    <input type="button" class="btn btn-primary" id="addrow" value="Add Zone" />
-                                                </td>
-                                                <td>    
-                                                    <input class="btn btn-success" type="button" value="Submit" onclick="submitConfig()">
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                            </tr>
-                                        </tfoot>
-                                    </table>
+
+                        <!-- System and Zones Card -->
+                        <div class="card mb-4">
+                            <div class="card-header"><i class="fas fa-sliders-h me-1"></i>System & Zone Configuration</div>
+                            <div class="card-body">
+                                <h5 class="card-title">System Settings</h5>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-floating mb-3">
+                                            <select class="form-select" id="timezone"><option value="" SELECTED>Choose one</option></select>
+                                            <label for="timezone">Time Zone</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-floating mb-3">
+                                            <input type="text" class="form-control" id="rainSenseGpio" size="2" maxlength="2" placeholder="2" value="2">
+                                            <label for="rainSenseGpio">Rain Sensor GPIO</label>
+                                        </div>
+                                    </div>
                                 </div>
-                             </div>  
-                         </div>
+                                <div class="row">
+                                    <div class="col-md-5">
+                                        <div class="form-floating mb-3">
+                                            <input type="text" class="form-control" id="weather_api_key" placeholder="API Key">
+                                            <label for="weather_api_key">OWM API Key <a href="#" class="text-decoration-none text-muted" data-bs-toggle="modal" data-bs-target="#owmInfoModal" style="pointer-events: auto;"><i class="fas fa-question-circle fa-sm"></i></a></label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-floating mb-3">
+                                            <input type="text" class="form-control" id="weather_location" placeholder="City,Country">
+                                            <label for="weather_location">Location (City,Country) <a href="#" class="text-decoration-none text-muted" data-bs-toggle="modal" data-bs-target="#locationInfoModal" style="pointer-events: auto;"><i class="fas fa-question-circle fa-sm"></i></a></label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="form-floating mb-3">
+                                            <input type="number" class="form-control" id="rain_chance_cutoff" placeholder="75" value="75" min="0" max="100">
+                                            <label for="rain_chance_cutoff">Rain Cutoff % <a href="#" class="text-decoration-none text-muted" data-bs-toggle="modal" data-bs-target="#rainCutoffInfoModal" style="pointer-events: auto;"><i class="fas fa-question-circle fa-sm"></i></a></label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr>
+                                <h5 class="card-title">Zone Configuration</h5>
+                                <table id="myTable" class="table table-hover order-list">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 15%;">Port <a href="#" class="text-decoration-none text-muted" data-bs-toggle="modal" data-bs-target="#portInfoModal" style="pointer-events: auto;"><i class="fas fa-question-circle fa-sm"></i></a></th>
+                                            <th style="width: 25%;">Name</th>
+                                            <th>Description</th>
+                                            <th style="width: 10%;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="zonebody">
+                                        <tr id="R1">
+                                            <td><input type="number" class="form-control" id="zonePort1" min="1" max="16" name="zonePort1"></td>
+                                            <td><input type="text" name="zoneName1" id="zoneName1" class="form-control" maxlength="20"/></td>
+                                            <td><input type="text" name="zoneDesc1" id="zoneDesc1" class="form-control"/></td>
+                                            <td><a class="deleteRow"></a></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <input type="button" class="btn btn-primary" id="addrow" value="Add Zone" />
+                            </div>
+                            <div class="card-footer text-end">
+                                <button id="submitConfigBtn" class="btn btn-success btn-lg" type="button" onclick="submitConfig()">
+                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                    <span class="button-text">Submit Configuration</span>
+                                </button>
+                            </div>
+                        </div>
+
                 </main>
                 <footer class="py-4 bg-light mt-auto">
                     <div class="container-fluid px-4">
                         <div class="d-flex align-items-center justify-content-between small">
-                            <div class="text-muted">Copyright &copy; Jordan Rubin 2023</div>
+                            <div class="text-muted">Copyright &copy; Jordan Rubin 2023-2026</div>
                             <div>
                                 <a href="#">Privacy Policy</a>
                                 &middot;
@@ -508,12 +590,18 @@ function getConf(){
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
     </body>
     <script> 
+    window.addEventListener('DOMContentLoaded', event => {
     tzPopulate();
         if (cnftype != 1){
             getConf();
             addSidebar();
             document.getElementById("title").innerHTML = "<h1>Configuration</h1>";
             document.getElementById("pwinfo").innerHTML = "You may choose to update the admin password here.";
+        } else {
+            // If it's the initial configuration, hide the sidebar toggle
+            const sidebarToggle = document.body.querySelector('#sidebarToggle');
+            if (sidebarToggle) sidebarToggle.style.display = 'none';
         }
-        </script>
+    });
+    </script>
 </html>

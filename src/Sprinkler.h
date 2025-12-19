@@ -9,17 +9,18 @@
 #include <Watermeter.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
-#include <detaBaseArduinoESP32.h>
 #include <LiquidCrystal_PCF8574.h>
 #include <WiFiClientSecure.h>
+#include <Firebase_ESP_Client.h>
 #ifndef Sprinkler_h
 #define Sprinkler_h
 
+void acctMgr(const char* action,const char* account,const char* val);
+
  typedef struct {
-      char id[20];
-      char apikey[50];
-      char name[50];
-  }dbcreds;
+      char database_url[150];
+      char database_secret[150];
+  }fbcreds;
 
 // This is the sprinkler class, takes PF575i2caddress, LCDi2caddress, LCDrows, and LCDcols
 class SPRINKLERSYSTEM
@@ -38,18 +39,10 @@ class SPRINKLERSYSTEM
         char* statusMsg;
         const char* thisname;
     };
-    struct dbqstruct
-    {
-      long timestamp;
-      char Action[7];
-      char Payload[100];
-      char Payload2[100];
-      char name[20];
-      String result;
-    }dbqstruct;
-    dbcreds acct;
-    struct dbqstruct dbq[5];
-    DetaBaseObject * detaObj; 
+    fbcreds fb_acct;
+    FirebaseData * fbdo;
+    FirebaseAuth * auth;
+    FirebaseConfig * config;
     FIVEWIREVALVE * thisvalve;
     LiquidCrystal_PCF8574 * lcd; 
     WATERMETER * flowmeter;
@@ -62,18 +55,14 @@ class SPRINKLERSYSTEM
     bool canceled; 
     double consumption;  
     int days[7] = { 0 };
-    bool detabaseconnect;
     const char * enabled;
-    bool hasDetabase;
+    bool hasFirebase;
     bool hasRainsensor;
     bool inManual;
     double lastConsumption =-1;
     int lcdaddress;
     int lcdrows;
     int lcdcols;
-    bool lcdlock;
-    int lcdlockmax = 200;
-    int lcdLockDelay = 20;
     bool manualZoneChange;
     int maxZones = 12;
     char measure;
@@ -86,7 +75,7 @@ class SPRINKLERSYSTEM
     int zoneCount = 0;
     int zoneRemaining;
     void activateSolenoid(int);
-    bool addDetabase(const char* id,const char* name,const char* apikey);
+    bool addFirebase(const char* database_url, const char* database_secret);
     void addMeter(int,bool,char,long,bool,double,int,bool);
     void addRainSensor(int);
     void addValve(int,int,int,bool); 
@@ -94,18 +83,13 @@ class SPRINKLERSYSTEM
     void begin();
     void cancelManual(void);
     void clearEnabled();
-    void closeZone(const char*, unsigned long);
-    int database(const char*, const char*);
-    int database(const char*, const char*,const char*);
-    String databaseQuery(const char*);
-    void dbQprocessor(void *);
-    static void databaseQtask(void *pvParameters);
+    void closeZone(const char*, unsigned long, const char* = NULL);
+    void deleteHistory();
     void facdef();
     void factoryDefaultChk();
     bool getDatabaseActive();
-    String getDatabaseQuery(const char *);
     const char * getDescription(const char *);
-    void getDetaAcct(dbcreds *);
+    String getHistory(int);
     bool getHasRainSensor();
     char getMeasureType();
     int getPort(const char *);
@@ -160,7 +144,7 @@ class SPRINKLERSYSTEM
     int value;
     int getIndex(const char*);
     int getIndex(int);
-    void lcdLockCheck();
     void writePf575(uint16_t);
+    SemaphoreHandle_t i2cMutex;
   };
 #endif

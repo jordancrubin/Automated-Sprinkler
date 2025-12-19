@@ -7,7 +7,6 @@
         <meta name="description" content="ESP 32 Irrigation Initial Configuration" />
         <meta name="author" content="Jordan Rubin" />
         <title>Zone Programmes - RubinTech</title>
-        <link href="https://cdn.jsdelivr.net/npm/simple-datatables@latest/dist/style.css" rel="stylesheet" />
         <link href="css/styles.css" rel="stylesheet" />
         <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/js/all.min.js" crossorigin="anonymous"></script>
         <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
@@ -76,6 +75,18 @@ function submitConfig(){
   wkflw.programb = programmeb;
   wkflw.programc = programmec; 
   if (err.length==0){
+    function showInfoModal(title, body) {
+        $('#exampleModalLongTitle').text(title);
+        $('#errorContent').html(body);
+        $('#infoModalCenter').modal('show');
+    }
+
+    const btn = document.getElementById('submitConfigBtn');
+    const spinner = btn.querySelector('.spinner-border');
+    const text = btn.querySelector('.button-text');
+    btn.disabled = true;
+    spinner.style.display = 'inline-block';
+    text.style.display = 'none';
     var xhr = new XMLHttpRequest();
     xhr.onreadystatechange = function() {
       if (this.readyState == 4 && this.status == 200) {
@@ -86,26 +97,36 @@ function submitConfig(){
                        if (this.readyState == 4 && this.status == 200) {
                         var returndata = JSON.parse(this.responseText);
                         if (returndata.s == "0"){
-                          alert("System updated, device will reboot with changes...");
-                          window.location.href = "login.html";
+                          showInfoModal("Update Successful", "System updated. The device is rebooting. You will be redirected automatically when it comes back online.");
+                          waitForReboot("login.html");
                         }
+                       } else if (this.readyState == 4) {
+                           btn.disabled = false;
+                           spinner.style.display = 'none';
+                           text.style.display = 'inline-block';
+                           showInfoModal("Update Failed", "Error submitting program configuration. Please try again.");
                        }
                       }; 
                     var jsonstr = JSON.stringify(wkflw);
                     xhx.open("POST", "updateConfig", true);
                     xhx.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-                    xhx.send("testval="+jsonstr+"&filetype=program");
+                    xhx.send("testval="+encodeURIComponent(jsonstr)+"&filetype=program");
                       }
                       else {
-                        alert("Update error, device wil reboot, try again...");
+                        showInfoModal("Update Failed", "An error occurred. The device will reboot. Please try again.");
                         window.location.href = "login.html";
                       }
+      } else if (this.readyState == 4) {
+           btn.disabled = false;
+           spinner.style.display = 'none';
+           text.style.display = 'inline-block';
+           showInfoModal("Update Failed", "Error submitting zone configuration. Please try again.");
       }
     };  
     var jsonstr = JSON.stringify(data);
     xhr.open("POST", "updateConfig", true);
     xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-    xhr.send("testval="+jsonstr+"&filetype=cfg");
+    xhr.send("testval="+encodeURIComponent(jsonstr)+"&filetype=zones");
   }
   document.getElementById('errorContent').innerHTML = msg;
   if (err.length !=0){
@@ -165,14 +186,16 @@ function getConf(){
         };
       xhr.open("POST", "getConf", true);
       xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-      xhr.send("filetype=cfg");
+      xhr.send("filetype=zones");
 }
         </script>
     </head>
     <body class="sb-nav-fixed">
         <nav class="sb-topnav navbar navbar-expand navbar-dark bg-dark">
             <!-- Navbar Brand-->
-            <a class="navbar-brand ps-3" href="/programme.html">ESP Irrigate</a>
+            <a class="navbar-brand ps-3" href="/programme.html"><i class="fas fa-faucet me-2"></i>ESP Irrigate</a>
+            <!-- Sidebar Toggle-->
+            <button class="btn btn-link btn-sm order-1 order-lg-0 me-4 me-lg-0" id="sidebarToggle" href="#!"><i class="fas fa-bars"></i></button>
             <!-- Navbar Search -->
             <form class="d-none d-md-inline-block form-inline ms-auto me-0 me-md-3 my-2 my-md-0">
             </form>
@@ -197,6 +220,7 @@ function getConf(){
         <div class="modal-body" id="errorContent">
         </div>
         <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">OK</button>
         </div>
       </div>
     </div>
@@ -204,22 +228,25 @@ function getConf(){
                     <div class="container-fluid px-4">
                     <div id="page-wrapper">
                         <div class="row">
-                          <div class="col-lg-12" id="title">
-                            <h1>Zone Programmes</h1>
+                          <div class="col-lg-12 mt-4" id="title">
+                            <h1><i class="fas fa-calendar-check me-2"></i>Zone Programmes</h1>
                           </div>
                         </div>
 
                         <div id="programmeListing"></div>
 
                     </div>
-                <div class="col-xs-1 col-md-1">        
-                  <input class="btn btn-success" type="button" value="Submit" onclick="submitConfig()">
+                <div class="d-grid gap-2 d-md-flex justify-content-md-end mb-4">        
+                  <button id="submitConfigBtn" class="btn btn-success" type="button" onclick="submitConfig()">
+                      <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                      <span class="button-text">Submit</span>
+                  </button>
                 </div>
           </main>
                 <footer class="py-4 bg-light mt-auto">
                     <div class="container-fluid px-4">
                         <div class="d-flex align-items-center justify-content-between small">
-                            <div class="text-muted">Copyright &copy; Jordan Rubin 2023</div>
+                            <div class="text-muted">Copyright &copy; Jordan Rubin 2023-2026</div>
                             <div>
                                 <a href="#">Privacy Policy</a>
                                 &middot;
@@ -236,6 +263,9 @@ function getConf(){
           getConf();
           if (cnftype != 1){
             addSidebar();
+          } else {
+            const sidebarToggle = document.body.querySelector('#sidebarToggle');
+            if (sidebarToggle) sidebarToggle.style.display = 'none';
           }
         </script>
     </body>

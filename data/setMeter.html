@@ -20,6 +20,8 @@
         <nav class="sb-topnav navbar navbar-expand navbar-dark bg-dark">
             <!-- Navbar Brand-->
             <a class="navbar-brand ps-3" href="/programme.html">ESP Irrigate</a>
+            <!--Sidebar Toggle-->
+            <button class="btn btn-link btn-sm order-1 order-lg-0 me-4 me-lg-0" id="sidebarToggle" href="#!"><i class="fas fa-bars"></i></button>
             <!-- Navbar Search -->
             <form class="d-none d-md-inline-block form-inline ms-auto me-0 me-md-3 my-2 my-md-0">
             </form>
@@ -48,49 +50,42 @@
       </div>
     </div>
   </div>
-                    <div class="container-fluid px-4">
-                    <div id="page-wrapper">
-                        <div class="row">
-                          <div class="col-lg-12" id="title">
-                            <h1>Meter Configuration</h1>
-                          </div>
+                    <div class="container-fluid px-4 mt-4">
+                        <h1 class="mt-4" id="title">Meter Configuration</h1>
+                        <div class="alert alert-info" id="mtrnotice">
+                          Adjustments should only be made when water is not flowing and the current reading is not moving.
                         </div>
-                        <div class="row">
-                          <div class="col-xs-4 col-md-6">
-                            <div class="alert alert-info" id="mtrnotice">
-                              Adjustments should only be made when water is not flowing and current reading is not moving.
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <i class="fas fa-tachometer-alt me-1"></i>
+                                Adjust Meter Reading
                             </div>
-                          </div>
-                        </div>                
-                        <div class="row">
-                          <div class="row">
-                            <div class="col-xs-4 col-md-2">
-                                <div class="form-group">
-                                  <form>
-                                    <div class="form-group">
-                                      <label>Current Reading</label>
-                                      <input type="text" class="form-control" id="CurrentMeterReading" maxlength="2" readonly>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-floating mb-3">
+                                            <input type="text" class="form-control" id="CurrentMeterReading" readonly>
+                                            <label for="CurrentMeterReading">Current Reading</label>
+                                        </div>
                                     </div>
-                                 </div>  
-                             </div>
-                                <div class="col-xs-4 col-md-2">
-                                    <div class="form-group">
-                                      <label>New Value</label>
-                                      <input type="text" class="form-control" id="newMeterReading">
+                                    <div class="col-md-6">
+                                        <div class="form-floating mb-3">
+                                            <input type="text" class="form-control" id="newMeterReading" placeholder="Enter new value">
+                                            <label for="newMeterReading">New Value</label>
+                                        </div>
                                     </div>
                                 </div>
-                          </div>
+                            </div>
+                            <div class="card-footer text-end">
+                                <button class="btn btn-success" type="button" onclick="submitMeter()">Submit New Value</button>
+                            </div>
                         </div>
-                     
                     </div>
-                <div class="col-xs-1 col-md-1"><BR>        
-                  <input class="btn btn-success" type="button" value="Submit" onclick="submitMeter()">
-                </div>
-          </main>
+                </main>
                 <footer class="py-4 bg-light mt-auto">
                     <div class="container-fluid px-4">
                         <div class="d-flex align-items-center justify-content-between small">
-                            <div class="text-muted">Copyright &copy; Jordan Rubin 2022</div>
+                            <div class="text-muted">Copyright &copy; Jordan Rubin 2023-2026</div>
                             <div>
                                 <a href="#">Privacy Policy</a>
                                 &middot;

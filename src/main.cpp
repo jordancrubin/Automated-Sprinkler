@@ -4,7 +4,7 @@
   any extra libraries beyond what I regularly use in my projects to put an ESP32
   on the network with an interactive Web based GUI. 
   https://www.youtube.com/c/jordanrubin6502
-  2023 Jordan Rubin.
+  2023-2026 Jordan Rubin.
 */
 
 #define FACDEFDELAY 5000
@@ -21,24 +21,25 @@
 #define WEBSERVPORT 80
 #include "AiEsp32RotaryEncoder.h"
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include "mbedtls/md.h"
-#include <HTTPClient.h>
+#include <NTPClient.h>
 #include <Sprinkler.h>
 #include <time.h>
 #include <WiFiAP.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
 const char* deviceName = "sprinkler32";  //Mdns name sprinkler32.local
 double lastTimepoll = -60000;
 const char* ntpServer = "pool.ntp.org";
 const char* ssid = "sprinklernet";    //SSID of the netconfig Access point
 struct tm timeinfo;
-bool detabaseconnect;
 bool displayLock;
 int displayprogram = 0;
-bool hasDetabase;
 int lastEncval;
 int menulevel   = 0;
 int selectlevel = 0;
@@ -48,8 +49,22 @@ int programMenu = -1;
 bool setManualFlag = false;
 bool setCancelFlag = false;
 bool zoneChangeFlag = false;
-const char* version = "1.0.0b";
+bool shouldRestart = false;
+unsigned long restartTime = 0;
+bool isTestingWifi = false;
+unsigned long testWifiStart = 0;
+const char* version = "2.0.0a";
 char selectedProgram[20];
+String weatherApiKey = "";
+String weatherLocation = "";
+String weatherDesc = "";
+String weatherIcon = "";
+float weatherTemp = 0.0;
+float weatherRainChance = 0.0;
+int weatherId = 0;
+bool useOWA = false;
+int rainChanceCutoff = 75;
+unsigned long lastWeatherCheck = -900000;
 const char * menu[3][5] = {
   {"CANCEL PROGRAMME","START PROGRAMME","REBOOT UNIT","SW VERSION","EXIT MENU"} 
 };
@@ -65,14 +80,88 @@ TaskHandle_t everyminutehandle  = NULL;
 TaskHandle_t rotaryLoophandle   = NULL;
 
 //////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[getWeather]---Fetch weather from OpenWeatherMap-------------]
+//////////////////////////////////////////////////////////////////////////
+void getWeather() {
+  if (weatherApiKey.length() == 0 || weatherLocation.length() == 0) return;
+  if ((millis() - lastWeatherCheck) < 900000) return; // Check every 15 mins
+  if (WiFi.status() != WL_CONNECTED) return;
+  HTTPClient http;
+  // Use Forecast API, cnt=8 limits response to next 24 hours (3h * 8)
+  String url = "http://api.openweathermap.org/data/2.5/forecast?q=" + weatherLocation + "&appid=" + weatherApiKey + "&units=metric&cnt=8";
+  int httpCode = 0;
+  int retries = 0;
+  while (retries < 3) {
+    http.begin(url);
+    httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) break;
+    http.end();
+    retries++;
+    delay(1000);
+  }
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(4096); // Increase buffer for forecast data
+    deserializeJson(doc, payload);
+    if(doc.containsKey("list")){
+      // Get current-ish conditions from the first forecast block
+      weatherDesc = doc["list"][0]["weather"][0]["description"].as<String>();
+      weatherIcon = doc["list"][0]["weather"][0]["icon"].as<String>();
+      weatherTemp = doc["list"][0]["main"]["temp"];
+      weatherId = doc["list"][0]["weather"][0]["id"];    
+      // Calculate max rain chance (pop) in the next 24h
+      float maxPop = 0.0;
+      for (int i = 0; i < 8; i++) {
+        float pop = doc["list"][i]["pop"]; // pop is 0.0 to 1.0
+        if (pop > maxPop) maxPop = pop;
+      }
+      weatherRainChance = maxPop * 100.0;
+      lastWeatherCheck = millis();
+    }
+  }
+  http.end();
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[logger]-------Push log entry to web browser as event--------]
 //////////////////////////////////////////////////////////////////////////
 void logger(String message) {
   char now[120];
   strftime(now, sizeof(now), "%Y-%m-%d %H:%M:%S - ", &timeinfo);
   String str(now);
-  message = now+message;  
-  events.send(message.c_str(),"message",millis());
+  String full_message = str + message;
+  events.send(full_message.c_str(),"message",millis());
+
+  // Recovery: If log.txt is missing but log.tmp exists (failed rotation), restore it.
+  if (!SPIFFS.exists("/log.txt") && SPIFFS.exists("/log.tmp")) {
+      SPIFFS.rename("/log.tmp", "/log.txt");
+  }
+
+  File logFile = SPIFFS.open("/log.txt", "a");
+  if (logFile) {
+    logFile.println(full_message);
+    Serial.printf("Logged to SPIFFS: %s\n", full_message.c_str());
+    size_t fSize = logFile.size();
+    logFile.close();
+    // Trim the log file if it gets too big (keep last 10KB if > 20KB)
+    if (fSize > 20480) { 
+      File readFile = SPIFFS.open("/log.txt", "r");
+      if (readFile) {
+        File tempFile = SPIFFS.open("/log.tmp", "w");
+        if (tempFile) {
+          readFile.seek(fSize - 10240);
+          while(readFile.available() && readFile.read() != '\n'); // Discard partial line
+          while(readFile.available()) tempFile.write(readFile.read());
+          tempFile.close();
+          readFile.close();
+          SPIFFS.remove("/log.txt");
+          SPIFFS.rename("/log.tmp", "/log.txt");
+        } 
+        else { readFile.close(); }
+      }
+    }
+  }
  }  
 //-----------------------------------------------------------------------]
 
@@ -98,22 +187,19 @@ String getContentType(String filename) {
 //////////////////////////////////////////////////////////////////////////
 void cookieParser(char (& Array)[4][70], const char * input){
   int currentCookie = 0, count = 0;
-  const char * token = input;
-  for(int i=0; i< strlen(token); i++){
-    if (((token[i] == ';')&&(token[i+1] == ' ')) || (i==strlen(token))){
-      char * returnSlot = Array[currentCookie];
-      returnSlot[count] = '\0';
+  int len = strlen(input);
+  for(int i=0; i< len; i++){
+    if (input[i] == ';') {
+      Array[currentCookie][count] = '\0';
       count = 0;
       currentCookie++;
-      i=i+2;   
+      if (currentCookie >= 4) break;
+      if (i + 1 < len && input[i+1] == ' ') i++; // Skip optional space
+      continue;
     }
-    char * returnSlot = Array[currentCookie];
-    returnSlot[count] = token[i];  
-    count++; 
-    if (i == (strlen(token)-1)){
-      returnSlot[count] = '\0'; 
-    }
+    if (count < 69) Array[currentCookie][count++] = input[i];
   }
+  Array[currentCookie][count] = '\0';
 }
 //-----------------------------------------------------------------------]
 
@@ -121,22 +207,22 @@ void cookieParser(char (& Array)[4][70], const char * input){
 //-FUNCTION-[getCookieUser]----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void getCookieUser(char * output, const char * input){ 
-  char fString[4][70];   
+  char fString[4][70] = {0};   
   cookieParser(fString,input);
-  char *cookieuser[10];
+  char *cookieuser[10] = {0};
   for (auto val : fString) {
     if (strncmp("USER=",val,5) == 0){ 
       char *ptr = NULL;
       byte index = 0; 
       ptr = strtok(val, "=");
-      while(ptr != NULL){
+      while(ptr != NULL && index < 10){
         cookieuser[index] = ptr;
         index++;
         ptr = strtok(NULL, "=");  // delimiters
       }
     }  
   }
-  strcpy(output,cookieuser[1]);
+  if (cookieuser[1]) strcpy(output,cookieuser[1]);
 }
 //-----------------------------------------------------------------------]
 
@@ -147,13 +233,17 @@ void readConfigFile(char* value, const char* filename, const char* parameter){
   File file = SPIFFS.open(filename,"r");
   if (file){
     DynamicJsonDocument doc(1024);
-    deserializeJson(doc, file);
-    if (doc.containsKey(parameter)) {
+    DeserializationError error = deserializeJson(doc, file);
+    if (!error && doc.containsKey(parameter)) {
       const char * source = doc[parameter];  
-      strncpy(value, source,strlen(source));
-      value[strlen(source)] = '\0';
-      file.close();
+      if (source) {
+        size_t len = strlen(source);
+        if (len > 49) len = 49;
+        memcpy(value, source, len);
+        value[len] = '\0';
+      }
     }
+    file.close();
   }  
 }
 // ----------------------------------------------------------------------] 
@@ -161,17 +251,20 @@ void readConfigFile(char* value, const char* filename, const char* parameter){
 //////////////////////////////////////////////////////////////////////////
 // FUNCTION - [writeConfigFile] - [Adds or updates key pair values in cfg files-]
 //////////////////////////////////////////////////////////////////////////
-void writeConfigFile(const char* value, const char* filename, const char* parameter){ 
-  File file = SPIFFS.open(filename,"r");
-  if (file){
-    DynamicJsonDocument doc(1024);
-    deserializeJson(doc, file);
-    file.close();
-    doc[value] = parameter;
-    File file = SPIFFS.open(filename,"w");
-    serializeJson(doc, file); 
-  } 
-  file.close();
+void writeConfigFile(const char* key, const char* filename, const char* value){ 
+  DynamicJsonDocument doc(8192);
+  File infile = SPIFFS.open(filename, "r");
+  if (infile) {
+    deserializeJson(doc, infile);
+    infile.close();
+  }
+  // set or replace the key with the provided value
+  doc[key] = value;
+  File outfile = SPIFFS.open(filename, "w");
+  if (outfile) {
+    serializeJson(doc, outfile);
+    outfile.close();
+  }
 }
 // ----------------------------------------------------------------------------]
 
@@ -185,7 +278,7 @@ void loadConfig(){
   sprinklersystem.lcdPrint("clr",0,1,"LOADCFG:");
   File file = SPIFFS.open("/system.cnf","r");
   sprinklersystem.lcdPrint("clr",0,2,"/system.cnf"); 
-  DynamicJsonDocument doc(1024);
+  DynamicJsonDocument doc(8192);
   deserializeJson(doc, file);  
   file.close();  
   int saveinterval = 0;  
@@ -193,7 +286,6 @@ void loadConfig(){
   const char* meas = doc["meas"];
   const char* deb = doc["mtrdeb"];
   const char* inc = doc["mtrinc"];
-  //i changed param 5 to 0
   sprinklersystem.addMeter(atoi(mtrio),1,meas[0],atoi(deb),0,atof(inc),saveinterval,true);
   const char* valopio = doc["valopio"];
   const char* valclio = doc["valclio"];
@@ -201,43 +293,44 @@ void loadConfig(){
   const char* valrainio = doc["rainsens"];
   sprinklersystem.addValve(atoi(valrlyio),atoi(valopio),atoi(valclio),1);
   if (strcmp(valrainio,"")!=0){   
-    sprinklersystem.addRainSensor(atoi(valrainio));
+     sprinklersystem.addRainSensor(atoi(valrainio));
   }
-  const char* apiKey = doc["detaapikey"];
-  const char* detaID = doc["detaid"];
-  const char* detaBaseName = doc["detaname"];
-  sprinklersystem.addDetabase(detaID,detaBaseName,apiKey);
-  JsonArray arr = doc["zones"].as<JsonArray>();
-  for (JsonVariant value : arr) {
-    JsonArray thiszone = value;
-    const char * port = thiszone.getElement(0);
-    const char * name = thiszone.getElement(1);
-    const char * desc = thiszone.getElement(2);
-    char* newname = strdup(name);
-    char* newdesc = strdup(desc);  
-    sprinklersystem.addZone(atoi(port),newname);
-    sprinklersystem.setDescription(name,newdesc);
+  if (doc.containsKey("firebase_database_url")) {
+    const char* fb_db_url = doc["firebase_database_url"];
+    const char* fb_secret = doc["firebase_database_secret"];
+    sprinklersystem.addFirebase(fb_db_url,fb_secret);
   }
-    if (doc.containsKey("program")){
-      const char* program = doc["program"];
-      sprinklersystem.setProgram(atoi(program));
+  File zfile = SPIFFS.open("/zones.cnf", "r");
+  if (zfile) {
+    DynamicJsonDocument zdoc(8192);
+    deserializeJson(zdoc, zfile);
+    zfile.close();
+    JsonArray arr = zdoc["zones"].as<JsonArray>();
+    for (JsonVariant value : arr) {
+      JsonArray thiszone = value.as<JsonArray>();
+      sprinklersystem.addZone(atoi(thiszone[0]), strdup(thiszone[1]));
+      sprinklersystem.setDescription(thiszone[1], strdup(thiszone[2]));
     }
-    if (doc.containsKey("rainsensstatus")){
-      const char* rainsensstatus = doc["rainsensstatus"]; 
-      sprinklersystem.setRainsensorStatus(atoi(rainsensstatus));
-    }
-    else {
-//Serial.println("rainsens key undefined");       
-       if (strcmp(valrainio,"")!=0){  
-//Serial.println("rainsens has gpio");       
-//           sprinklersystem.setRainsensorStatus(1);
-//save value of 1
-       } 
-    }
-   sprinklersystem.loadMeter(); 
-   const char* tzData = doc["timez"];
-   setenv("TZ", tzData, 1 );
-   tzset();
+  }
+  if (doc.containsKey("program")){
+    const char* program = doc["program"];
+    sprinklersystem.setProgram(atoi(program));
+  }
+  if (doc.containsKey("rainsensstatus")){
+    const char* rainsensstatus = doc["rainsensstatus"]; 
+    sprinklersystem.setRainsensorStatus(atoi(rainsensstatus));
+  }
+  else {      
+    if (strcmp(valrainio,"")!=0){    } 
+  }
+  if (doc.containsKey("weather_api_key")) weatherApiKey = doc["weather_api_key"].as<String>();
+  if (doc.containsKey("weather_location")) weatherLocation = doc["weather_location"].as<String>();
+  if (doc.containsKey("use_owa")) useOWA = doc["use_owa"];
+  if (doc.containsKey("rain_chance_cutoff")) rainChanceCutoff = doc["rain_chance_cutoff"];
+  const char* tzData = doc["timez"];
+  setenv("TZ", tzData, 1 );
+  tzset();
+  sprinklersystem.loadMeter(); 
 }
 // ----------------------------------------------------------------------------]
 
@@ -247,15 +340,14 @@ void loadConfig(){
 bool isAuth(AsyncWebServerRequest *request) {
   if (request->hasHeader("Cookie")) {
     String cookie = request->header("Cookie");
-    char user[20];
+    char user[20] = {0};
     getCookieUser(user,request->header("Cookie").c_str()); 
-    char filepwd[50];
+    if (strlen(user) == 0) return false;
+    char filepwd[50] = {0};
     readConfigFile(filepwd,"/accounts.cnf",user);
     String convFilePwd = filepwd;
     String cookieUser = user;
-    String token = sha1(String(cookieUser) + ":" +      
-    String(convFilePwd) + ":" + 
-    request->client()->remoteIP().toString());
+    String token = sha1(String(cookieUser) + ":" + String(convFilePwd));
     if (cookie.indexOf("SESSIONID=" + token) != -1) {
       return true;
     }
@@ -269,9 +361,12 @@ bool isAuth(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 bool startZone(const char * zone) {
   const char * currentZone = sprinklersystem.isEnabled();
+  if (strcmp(zone, "-1") == 0) {
+    // Do not start a zone if the name is invalid
+    return false;
+  }
   if (zoneChangeFlag){
     zoneChangeFlag = false;
-    sprinklersystem.setManualZoneChange(true);
   }
   else if (strcmp(currentZone,zone)==0){
     return 0;   
@@ -284,8 +379,8 @@ bool startZone(const char * zone) {
   getLocalTime(&timeinfo);
   tst = time(&now);
   sprinklersystem.runZone(zone, tst);
-  delay(2000);
   lastTimepoll = -25000;
+  events.send("1","stats",millis());
   return 0;
 }
 //-----------------------------------------------------------------------]
@@ -295,7 +390,9 @@ bool startZone(const char * zone) {
 //////////////////////////////////////////////////////////////////////////
 bool handleFileRead(AsyncWebServerRequest *request, String path) {
   if (!isAuth(request)) {
-    path = "/login.html";
+    if (path.endsWith("/") || path.endsWith(".html") || path.endsWith(".htm")) {
+      path = "/login.html";
+    }
   } 
   else {
     if (path.endsWith("/")) path += F("index.html"); // If a folder is requested, send the index file
@@ -303,6 +400,17 @@ bool handleFileRead(AsyncWebServerRequest *request, String path) {
   String contentType = getContentType(path);              // Get the MIME type
   String pathWithGz = path + F(".gz");
   if(SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)){   // If the file exists, either as a compressed archive, or normal
+    // Check for redirects BEFORE creating response or modifying path for GZ
+    if(path == "/index.html"){
+      if (!SPIFFS.exists("/system.cnf")){  
+        request->redirect("/configure.html?newcnf=1");
+        return true;
+      }
+      if (!SPIFFS.exists("/programmes.cnf")){ 
+        request->redirect("/programme.html?inc=1");
+        return true;
+      } 
+    }
     bool gzipped = false;
     if(SPIFFS.exists(pathWithGz)) {                       // If there's a compressed version available
       path += F(".gz");                                   // Use the compressed version
@@ -311,16 +419,6 @@ bool handleFileRead(AsyncWebServerRequest *request, String path) {
     AsyncWebServerResponse *response = request->beginResponse(SPIFFS, path, contentType);
     if (gzipped){
       response->addHeader("Content-Encoding", "gzip");
-    }
-    if(path=="/index.html"){
-      if (!SPIFFS.exists("/system.cnf")){  
-        request->redirect("/configure.html?newcnf=1");
-      }
-      else {
-        if (!SPIFFS.exists("/programmes.cnf")){ 
-          request->redirect("/programme.html?inc=1");
-        } 
-      }
     }
     response->addHeader("Cache-Control", "no-cache");  
     request->send(response);
@@ -365,16 +463,22 @@ void handleLogin(AsyncWebServerRequest *request) {
     return;
   }
   else {
-    char filepwd[50];
+    char filepwd[50] = {0};
     readConfigFile(filepwd,"/accounts.cnf",user.c_str());
     String convFilePwd = filepwd;
-    if (convFilePwd == request->arg("password")){
+    if (convFilePwd.length() > 0 && convFilePwd == request->arg("password")){
       AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
-      response->addHeader("Location", "/");
+      if (!SPIFFS.exists("/system.cnf")){  
+        response->addHeader("Location", "/configure.html?newcnf=1");
+      } else if (!SPIFFS.exists("/programmes.cnf")){ 
+        response->addHeader("Location", "/programme.html?inc=1");
+      } else {
+        response->addHeader("Location", "/");
+      }
       response->addHeader("Cache-Control", "no-cache");
-      String token = sha1(request->arg("username") + ":" + convFilePwd + ":" + request->client()->remoteIP().toString());
-      response->addHeader("Set-Cookie", "SESSIONID=" + token);
-      response->addHeader("Set-Cookie", "USER=" + request->arg("username"));
+      String token = sha1(request->arg("username") + ":" + convFilePwd);
+      response->addHeader("Set-Cookie", "SESSIONID=" + token + "; Path=/");
+      response->addHeader("Set-Cookie", "USER=" + request->arg("username") + "; Path=/", false);
       request->send(response);
       return;
     }
@@ -394,7 +498,7 @@ void handleLogout(AsyncWebServerRequest *request) {
   AsyncWebServerResponse *response = request->beginResponse(301); //Sends 301 redirect
   response->addHeader("Location", "/login.html?msg=User disconnected");
   response->addHeader("Cache-Control", "no-cache");
-  response->addHeader("Set-Cookie", "SESSIONID=0");
+  response->addHeader("Set-Cookie", "SESSIONID=0; Path=/");
   request->send(response);
   return;
 }
@@ -403,8 +507,8 @@ void handleLogout(AsyncWebServerRequest *request) {
 //////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handlePullStats]--------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
-void handlePullStats(AsyncWebServerRequest *request) { 
-  updatepullstatsflag = atoi(request->arg("statsdays").c_str()); 
+void handlePullStats(AsyncWebServerRequest *request) {
+  updatepullstatsflag = request->arg("statsdays").toInt();
   request->send(200, "text/html", "{\"s\":\"1\"}");
 }
 //-----------------------------------------------------------------------]
@@ -422,6 +526,7 @@ void handleCancelrun(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleCfgRoot]----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleCfgRoot(AsyncWebServerRequest *request) { 
+  Serial.println("[CfgRoot] Serving cfgindex.html");
   request->send(SPIFFS, "/cfgindex.html");
 }
 //-----------------------------------------------------------------------]
@@ -430,11 +535,44 @@ void handleCfgRoot(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleCheckStatus]------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleCheckStatus(AsyncWebServerRequest *request) {
-  char result[20];
-  readConfigFile(result,"/testresult.cnf","CONN");      
-  request->send(200, "text/html", result);
-  if (strcmp(result,"SUCCESS") == 0){
-    ESP.restart();
+  if (isTestingWifi) {
+    if (WiFi.status() == WL_CONNECTED || WiFi.localIP() != IPAddress(0,0,0,0)) {
+      if (SPIFFS.exists("/testnetwork.cnf")) {
+        SPIFFS.remove("/network.cnf");
+        SPIFFS.rename("/testnetwork.cnf", "/network.cnf");
+      }
+      File resultfile = SPIFFS.open("/testresult.cnf", "w");
+      if (resultfile) {
+        resultfile.print("{\"CONN\":\"SUCCESS\"}");
+        resultfile.close();
+      }
+      isTestingWifi = false;
+      shouldRestart = true;
+      restartTime = millis();
+      request->send(200, "text/html", "SUCCESS");
+    } 
+    else if (millis() - testWifiStart > 30000) {
+      File resultfile = SPIFFS.open("/testresult.cnf", "w");
+      if (resultfile) {
+        resultfile.print("{\"CONN\":\"FAIL\"}");
+        resultfile.close();
+      }
+      isTestingWifi = false;
+      request->send(200, "text/html", "FAIL");
+    } 
+    else {
+      request->send(200, "text/html", "WAIT");
+    }
+  } 
+  else {
+    if (SPIFFS.exists("/testresult.cnf")) {
+      char result[50] = {0};
+      readConfigFile(result,"/testresult.cnf","CONN");      
+      request->send(200, "text/html", result);
+    } 
+    else {
+      request->send(200, "text/html", "IDLE");
+    }
   }
 }
 //-----------------------------------------------------------------------]
@@ -464,27 +602,70 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
     logger("Rain Sensor Status Toggled");
     return;
   }
-  DynamicJsonDocument doc(1024);
-  deserializeJson(doc, request->arg("testval").c_str());
-  if (request->arg("filetype") == "cfg") {
-    filename = "/system.cnf";
-    const char* password = doc["pass"];
-    if (strcmp(password,"") != 0){
-      writeConfigFile("admin","/accounts.cnf",password);
+  if (request->arg("event") == "owachange") { //owa change
+    const char * val = request->arg("value").c_str();    
+    writeConfigFile("use_owa","/system.cnf",val); 
+    useOWA = atoi(val);
+    request->send(200, "text/html", "{\"s\":\"0\"}");
+    logger("OWA Rain Delay Status Toggled");
+    return;
+  }
+  if(!request->hasArg("testval")){
+    request->send(400, "text/plain", "Missing configuration data");
+    return;
+  }
+  {
+    Serial.printf("Free Heap: %u\n", ESP.getFreeHeap());
+    DynamicJsonDocument doc(16384);
+    DeserializationError error = deserializeJson(doc, request->arg("testval").c_str());
+    if (error) {
+      Serial.printf("JSON Error: %s\n", error.c_str());
+      request->send(500, "text/plain", "JSON Deserialization Error");
+      return;
     }
-  if(sprinklersystem.getProgram() > 0){
-    char thisProg[3];
-    itoa(sprinklersystem.getProgram(),thisProg,10);
-    doc["program"] = thisProg;
+    if (request->arg("filetype") == "zones") {
+      filename = "/zones.cnf";
+    }
+    if (request->arg("filetype") == "cfg") {
+      filename = "/system.cnf";
+      const char* password = doc["pass"];
+      if (password && strlen(password) > 0){
+        DynamicJsonDocument accDoc(512);
+        File accFile = SPIFFS.open("/accounts.cnf", "r");
+        if (accFile) {
+            deserializeJson(accDoc, accFile);
+            accFile.close();
+        }
+        accDoc["admin"] = password;
+        File accOut = SPIFFS.open("/accounts.cnf", "w");
+        if (accOut) {
+            serializeJson(accDoc, accOut);
+            accOut.close();
+        }
+      }
+      if(sprinklersystem.getProgram() > 0){
+        char thisProg[3];
+        itoa(sprinklersystem.getProgram(),thisProg,10);
+        doc["program"] = thisProg;
+      }
+      doc.remove("pass");
+    }
+    File resultfile = SPIFFS.open(filename,"w");
+    if (resultfile) {
+      serializeJson(doc, resultfile);
+      resultfile.close();
+    } 
+    else {
+      request->send(500, "text/plain", "File Write Error");
+      return;
+    }
   }
-    doc.remove("pass");
-  }
-  File resultfile = SPIFFS.open(filename,"w");
-  serializeJson(doc, resultfile);
-  resultfile.close();
+
   request->send(200, "text/html", "{\"s\":\"0\"}");
-  delay(400);
-  ESP.restart();
+  if(!request->hasArg("norestart")){
+    shouldRestart = true;
+    restartTime = millis();
+  }
 }
 //-----------------------------------------------------------------------]
 
@@ -492,34 +673,42 @@ void handleUpdateConfig(AsyncWebServerRequest *request) {
 //-FUNCTION-[handleUpdateStatus]-----------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleUpdateStatus(AsyncWebServerRequest *request) {
-  String state, info, zname, valve, rsState, rsExist;
+  StaticJsonDocument<512> doc;
+  String output;
   int i = sprinklersystem.timeToProgStart(&timeinfo); 
-  const char * valvePos = sprinklersystem.valvePosition();
-  bool rs = sprinklersystem.readRainSensor();
-  bool rsEx = sprinklersystem.getHasRainSensor();
-  bool dbActive = sprinklersystem.getDatabaseActive();
-  valve = valvePos;
-  rsState = rs;
-  rsExist = rsEx;
-  if(sprinklersystem.getProgram()==4){state="0";} //programme off
-  else if(!sprinklersystem.isSchedForToday(&timeinfo)){state ="1";} //Idle, not today
-  else if(sprinklersystem.isCanceled()){state ="2";} // Manual cancellation
+  doc["valve"] = sprinklersystem.valvePosition();
+  doc["rsstate"] = sprinklersystem.readRainSensor();
+  doc["rsexist"] = sprinklersystem.getHasRainSensor();
+  doc["dbactive"] = sprinklersystem.getDatabaseActive();
+  doc["manual"] = sprinklersystem.isInManualProgram();
+  doc["w_desc"] = weatherDesc;
+  doc["w_temp"] = weatherTemp;
+  doc["w_icon"] = weatherIcon;
+  doc["use_owa"] = useOWA;
+  doc["w_pop"] = weatherRainChance;
+  doc["rain_cutoff"] = rainChanceCutoff;
+  doc["owa_setup"] = (weatherApiKey.length() > 0 && weatherLocation.length() > 0);
+  bool physicalRain = (sprinklersystem.getHasRainSensor() && sprinklersystem.getRainSensor() && sprinklersystem.readRainSensor() == 0);
+  bool owaRain = (useOWA && ((weatherId >= 200 && weatherId <= 531) || (weatherRainChance >= rainChanceCutoff)));
+  if(sprinklersystem.getProgram()==4){doc["state"] = "0";} //programme off
+  else if(!sprinklersystem.isSchedForToday(&timeinfo)){doc["state"] = "1";} //Idle, not today
+  else if(sprinklersystem.isCanceled()){doc["state"] = "2";} // Manual cancellation
   else if(i>0){
-      state ="3";
-      info = i;
+    doc["state"] = "3";
+    doc["info"] = i;
   } //countdown to start
-  else if(sprinklersystem.isTodayComplete(&timeinfo)){state="4";} //completed for today 
+  else if(sprinklersystem.isTodayComplete(&timeinfo)){doc["state"] = "4";} //completed for today 
   //elsif made it this far but rain delay state = 6
-  else if ((sprinklersystem.readRainSensor()==0) && (!sprinklersystem.isInManualProgram()) ){state="6";}
+  else if ((physicalRain || owaRain) && (!sprinklersystem.isInManualProgram()) ){doc["state"] = "6";}
   else {
-      state="5";
-      const char * zoneName = sprinklersystem.getSchedZone(i);
-      int zr = sprinklersystem.getZoneRemaining();
-      zname = zoneName;
-      info = zr;
-    }//currently running
-  String S = "{\"state\":\""+state+"\",\"info\":\""+info+"\",\"rsstate\":\""+rsState+"\",\"rsexist\":\""+rsExist+"\", \"dbactive\":\""+dbActive+"\",\"zone\":\""+zname+"\",\"valve\":\""+valve+"\"}";
-  request->send(200, "text/html", S);
+    doc["state"] = "5";
+    const char * zoneName = sprinklersystem.getSchedZone(i);
+    int zr = sprinklersystem.getZoneRemaining();
+    doc["zone"] = zoneName;
+    doc["info"] = zr;
+  }//currently running
+  serializeJson(doc, output);
+  request->send(200, "application/json", output);
 }
 //-----------------------------------------------------------------------]
 
@@ -529,9 +718,12 @@ void handleUpdateStatus(AsyncWebServerRequest *request) {
 void handleGetconf(AsyncWebServerRequest *request) {
   char user[20];
   const char *filename = "/programmes.cnf";
-    if (request->arg("filetype") == "cfg") {
-      filename = "/system.cnf";
-    }
+  if (request->arg("filetype") == "cfg") {
+    filename = "/system.cnf";
+  }
+  if (request->arg("filetype") == "zones") {
+    filename = "/zones.cnf";
+  }
   getCookieUser(user,request->header("Cookie").c_str());
     if (strcmp(user,"admin")==0){   
       request->send(SPIFFS, filename);          
@@ -570,6 +762,20 @@ void handleReadMeter(AsyncWebServerRequest *request) {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[handleGetLogs]----------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void handleGetLogs(AsyncWebServerRequest *request){
+  if (SPIFFS.exists("/log.txt")) {
+    request->send(SPIFFS, "/log.txt", "text/plain");
+  } else if (SPIFFS.exists("/log.tmp")) {
+    request->send(SPIFFS, "/log.tmp", "text/plain");
+  } else {
+    request->send(200, "text/plain", "");
+  }
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handleGetZoneList]------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleGetZoneList(AsyncWebServerRequest *request) {
@@ -590,25 +796,13 @@ void handleGetZoneList(AsyncWebServerRequest *request) {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[handleGetCreds]---------------------------------------------]
-//////////////////////////////////////////////////////////////////////////
-void handleGetCreds(AsyncWebServerRequest *request) {
-  dbcreds detacreds;
-  sprinklersystem.getDetaAcct(&detacreds);
-  String apikey = detacreds.apikey;
-  String name = detacreds.name;
-  String id = detacreds.id; 
-  String S = "{\"a\":\""+apikey+"\",\"n\":\""+name+"\",\"i\":\""+id+"\"}";
-  request->send(200, "text/html", S);
-}
-
-//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handleSendManual]------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleSendManual(AsyncWebServerRequest *request) {
   const char * val = request->arg("zone").c_str();   
   setManualFlag = true;
-  strncpy(selectedProgram,val,20);
+  strncpy(selectedProgram, val, sizeof(selectedProgram) - 1);
+  selectedProgram[sizeof(selectedProgram) - 1] = 0; // Ensure null termination
   request->send(200, "text/html", "{\"status\":\"ok\"}");
 }
 //-----------------------------------------------------------------------]
@@ -627,55 +821,27 @@ void handleSubmitNewMeter(AsyncWebServerRequest *request) {
 //-FUNCTION-[sha1]-------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 String sha1(String payloadStr){
-    const char *payload = payloadStr.c_str(); 
-    int size = 20;
-    byte shaResult[size];
-    mbedtls_md_context_t ctx;
-    mbedtls_md_type_t md_type = MBEDTLS_MD_SHA1;
-    const size_t payloadLength = strlen(payload);
-    mbedtls_md_init(&ctx);
-    mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(md_type), 0);
-    mbedtls_md_starts(&ctx);
-    mbedtls_md_update(&ctx, (const unsigned char *) payload, payloadLength);
-    mbedtls_md_finish(&ctx, shaResult);
-    mbedtls_md_free(&ctx);
-    String hashStr = "";
-    for(uint16_t i = 0; i < size; i++) {
-      String hex = String(shaResult[i], HEX);
-      if(hex.length() < 2) {
-        hex = "0" + hex;
-      }
-      hashStr += hex;
+  const char *payload = payloadStr.c_str(); 
+  int size = 20;
+  byte shaResult[size];
+  mbedtls_md_context_t ctx;
+  mbedtls_md_type_t md_type = MBEDTLS_MD_SHA1;
+  const size_t payloadLength = strlen(payload);
+  mbedtls_md_init(&ctx);
+  mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(md_type), 0);
+  mbedtls_md_starts(&ctx);
+  mbedtls_md_update(&ctx, (const unsigned char *) payload, payloadLength);
+  mbedtls_md_finish(&ctx, shaResult);
+  mbedtls_md_free(&ctx);
+  String hashStr = "";
+  for(uint16_t i = 0; i < size; i++) {
+    String hex = String(shaResult[i], HEX);
+    if(hex.length() < 2) {
+      hex = "0" + hex;
     }
-    return hashStr;
-}
-//-----------------------------------------------------------------------]
-
-//////////////////////////////////////////////////////////////////////////
-//-FUNCTION-[serverRouting]----------------------------------------------]
-//////////////////////////////////////////////////////////////////////////
-void serverRouting() {
-  server.on("/cancelRun",     HTTP_POST, handleCancelrun);
-  server.on("/login",         HTTP_POST, handleLogin);
-  server.on("/logout",        HTTP_GET,  handleLogout);
-  server.on("/updateConfig",  HTTP_POST, handleUpdateConfig);
-  server.on("/getConf",       HTTP_POST, handleGetconf);
-  server.on("/getProg",       HTTP_POST, handleGetprogram);
-  server.on("/getRainsense",  HTTP_POST, handleGetrainSense);
-  server.on("/getZoneList",   HTTP_GET,  handleGetZoneList);
-  server.on("/getCreds",      HTTP_GET,  handleGetCreds);
-  server.on("/readMeter",     HTTP_POST, handleReadMeter);
-  server.on("/sendManual",    HTTP_POST, handleSendManual);
-  server.on("/sendNewMeter",  HTTP_POST, handleSubmitNewMeter);
-  server.on("/updateStatus",  HTTP_POST, handleUpdateStatus);
-  server.on("/metricRequest", HTTP_POST, handlePullStats);
-  server.onNotFound([](AsyncWebServerRequest *request) {  // If the client requests any URI
-    if (!handleFileRead(request, request->url())){        // send it if it exists
-      handleNotFound(request); // respond 404 
-    }
-  });
-  server.serveStatic("/configuration.json", SPIFFS, "/configuration.json", "no-cache, no-store, must-revalidate");
-  server.serveStatic("/", SPIFFS, "/", "max-age=31536000");
+    hashStr += hex;
+  }
+  return hashStr;
 }
 //-----------------------------------------------------------------------]
 
@@ -685,15 +851,46 @@ void serverRouting() {
 void handleWifiConnect(AsyncWebServerRequest *request) { 
   File testfile = SPIFFS.open("/testnetwork.cnf","w");
   if (!testfile){
+      request->send(500, "text/plain", "FS_ERROR");
       return;  
   }
-  AsyncWebParameter* p = request->getParam(0);
-  testfile.print("{\"SSID\":\""); testfile.print(p->value().c_str());
-  p = request->getParam(1);
-  testfile.print("\",\"PASSWORD\":\""); testfile.print(p->value().c_str()); testfile.print("\"}"); 
+  if (!request->hasParam("ssidval", true) || !request->hasParam("keyval", true)) {
+      request->send(400, "text/plain", "BAD_PARAMS");
+      testfile.close();
+      return;
+  }
+  String ssid = request->getParam("ssidval", true)->value();
+  String pass = request->getParam("keyval", true)->value();
+  testfile.print("{\"SSID\":\""); testfile.print(ssid);
+  testfile.print("\",\"PASSWORD\":\""); testfile.print(pass); testfile.print("\"}"); 
   testfile.close();
-  request->send(200, "text/html", "RCVD"); 
-  startup();
+  if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  isTestingWifi = true;
+  testWifiStart = millis();
+  request->send(200, "text/html", "RCVD");
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[handleGetHistory]-------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void handleGetHistory(AsyncWebServerRequest *request) {
+  int days = 30;
+  if (request->hasArg("days")) {
+    days = request->arg("days").toInt();
+  }
+  String history = sprinklersystem.getHistory(days);
+  request->send(200, "application/json", history);
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[handleDeleteHistory]----------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void handleDeleteHistory(AsyncWebServerRequest *request) {
+  sprinklersystem.deleteHistory();
+  request->send(200, "text/html", "{\"status\":\"ok\"}");
 }
 //-----------------------------------------------------------------------]
 
@@ -715,6 +912,37 @@ void handleWifiList(AsyncWebServerRequest *request) {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[serverRouting]----------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void serverRouting() {
+  // Specific API and page handlers
+  server.on("/cancelRun",     HTTP_POST, handleCancelrun);
+  server.on("/login",         HTTP_POST, handleLogin);
+  server.on("/logout",        HTTP_GET,  handleLogout);
+  server.on("/updateConfig",  HTTP_POST, handleUpdateConfig);
+  server.on("/getConf",       HTTP_POST, handleGetconf);
+  server.on("/getProg",       HTTP_POST, handleGetprogram);
+  server.on("/getRainsense",  HTTP_POST, handleGetrainSense);
+  server.on("/getZoneList",   HTTP_GET,  handleGetZoneList);
+  server.on("/readMeter",     HTTP_POST, handleReadMeter);
+  server.on("/sendManual",    HTTP_POST, handleSendManual);
+  server.on("/sendNewMeter",  HTTP_POST, handleSubmitNewMeter);
+  server.on("/updateStatus",  HTTP_POST, handleUpdateStatus);
+  server.on("/metricRequest", HTTP_POST, handlePullStats);
+  server.on("/connectwWifi", HTTP_POST, handleWifiConnect);
+  server.on("/checkStatus",  HTTP_GET, handleCheckStatus);
+  server.on("/getHistory",    HTTP_GET, handleGetHistory);
+  server.on("/deleteHistory", HTTP_POST, handleDeleteHistory);
+  server.on("/getLogs",       HTTP_GET, handleGetLogs);
+  // Static file handlers (catch-alls) should be last
+  server.serveStatic("/configuration.json", SPIFFS, "/configuration.json", "no-cache, no-store, must-revalidate");
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    if (!handleFileRead(request, request->url())) handleNotFound(request);
+  });
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[configNetwork]----------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void configNetwork() { 
@@ -728,7 +956,6 @@ void configNetwork() {
   WiFi.softAP(ssid);
   IPAddress myIP = WiFi.softAPIP();
   if (!MDNS.begin(deviceName)){
-//  Serial.print(F("Error starting mDNS"));
   }
   WiFi.scanNetworks();
   if (SPIFFS.exists("/testnetwork.cnf")){  
@@ -759,6 +986,7 @@ void configNetwork() {
     resultfile.close();
     SPIFFS.rename("/testnetwork.cnf", "/network.cnf");
   }
+  Serial.print("hcfgoot");
   server.on("/", HTTP_GET , handleCfgRoot);
 }
 //-----------------------------------------------------------------------]
@@ -767,11 +995,11 @@ void configNetwork() {
 //-FUNCTION-[loadNetwork]------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void loadNetwork() {
-  char ssid[50]; 
+  char ssid[50] = {0}; 
   readConfigFile(ssid,"/network.cnf","SSID");  
   sprinklersystem.lcdPrint("clr",0,2,"Connecting");
   sprinklersystem.lcdClearRow(3);
-  char key[50];
+  char key[50] = {0};
   readConfigFile(key,"/network.cnf","PASSWORD");  
   if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
    WiFi.begin(ssid,key);
@@ -816,13 +1044,29 @@ void loadNetwork() {
 // FUNCTION - [acctMgr] - [Initializes and handles user accounts--------] lib
 /////////////////////////////////////////////////////////////////////////
 void acctMgr(const char* action,const char* account,const char* val){
- if(!SPIFFS.exists("/accounts.cnf")){ 
+ bool shouldCreate = !SPIFFS.exists("/accounts.cnf");
+ if (!shouldCreate) {
+    File f = SPIFFS.open("/accounts.cnf", "r");
+    if (f) {
+       if (f.size() == 0) {
+         shouldCreate = true;
+       } else {
+         DynamicJsonDocument doc(256);
+         DeserializationError error = deserializeJson(doc, f);
+         if (error) shouldCreate = true;
+       }
+       f.close();
+    } else {
+      shouldCreate = true;
+    }
+ }
+ if(shouldCreate){ 
     File accountfile = SPIFFS.open("/accounts.cnf","w");
     if (!accountfile){
       return;  
     }
     if ((strcmp(action,"inspect")==0) && (strcmp(account,"admin")==0) && (strcmp(val,"0")==0)){
-      accountfile.println("{\"admin\":\"password\"}"); 
+      accountfile.print("{\"admin\":\"password\"}"); 
       accountfile.close();
     } 
     return;
@@ -865,15 +1109,20 @@ void displayMeter() {
 //////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[closeZones]-------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
-void closeZones() {
+void closeZones(const char* annotation = NULL) {
   String message = "Closure of zones and valve requested";
+  if (annotation) {
+    message += " [";
+    message += annotation;
+    message += "]";
+  }
   logger(message);
   sprinklersystem.setValve("CLOSED");
   unsigned long tst;
   time_t now;
   getLocalTime(&timeinfo);
   tst = time(&now);
-  sprinklersystem.closeZone(sprinklersystem.isEnabled(),tst);
+  sprinklersystem.closeZone(sprinklersystem.isEnabled(),tst, annotation);
   sprinklersystem.clearEnabled();
   delay(10000);
   events.send("1","stats",millis());
@@ -1056,11 +1305,13 @@ void mainPoll(void * parameter){
 //-TASK-[everyMinute]----------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void everyMinute(void * parameter){
+  static bool lastRainDelayState = false;
   for (;;){
     delay(700); //LCD NEEDED
     if ((millis()-lastTimepoll) >= 30000){ //60000 NORM.
       displayHeader();
       displayProgram();
+      getWeather();
       if (sprinklersystem.isInManualProgram()){ //HANDLE MANUAL OPS
         handleManualsched();               
       }
@@ -1076,8 +1327,8 @@ void everyMinute(void * parameter){
           sprinklersystem.setCanceled(false);
         }
       }
-      else if((!sprinklersystem.isSchedForToday(&timeinfo)) || //HANDLE IDLE
-        sprinklersystem.getProgram()==4){
+      else if(!sprinklersystem.isInManualProgram() && ((!sprinklersystem.isSchedForToday(&timeinfo)) || //HANDLE IDLE
+        sprinklersystem.getProgram()==4)){
         if(sprinklersystem.isActive()){        
           closeZones();
         }
@@ -1088,12 +1339,10 @@ void everyMinute(void * parameter){
       }
       else {
         int i = sprinklersystem.timeToProgStart(&timeinfo);
-        if (i > 0){
-          displayCountdown(i);        
-        }
-        else { //Todays Activity Arrived or passed
-          const char *  zoneName = sprinklersystem.getSchedZone(i); 
-          if(sprinklersystem.isTodayComplete(&timeinfo)){
+        const char * zoneName = sprinklersystem.getSchedZone(i);
+        if (i > 0) {
+          displayCountdown(i);
+        } else if (strcmp(zoneName, "-1") == 0) { // isTodayComplete
             if (sprinklersystem.isInManualProgram()){  
               sprinklersystem.cancelManual();
             }           
@@ -1104,29 +1353,34 @@ void everyMinute(void * parameter){
             if(sprinklersystem.isActive()){
               closeZones();
             }
-          }
-          else {
-            if(!displayLock){
-              //check rain sensor
-              if ((sprinklersystem.getHasRainSensor()) && (sprinklersystem.getRainSensor())){     
-                if ((sprinklersystem.readRainSensor() ==0) && (!sprinklersystem.isInManualProgram())){  //engaged AND NOT MANUAL MODE
-                  sprinklersystem.lcdPrint("clr",3,2,"--Rain Delay--");
-                  if(sprinklersystem.isActive()){
-                    closeZones();
-                  }
-                  continue;
-                }  
-              }
-              int zr = sprinklersystem.getZoneRemaining();
-              //PLACEHOLDER TO KICKOFF THE RUN TASK AND HALT THIS ONE
-              char thiszr[4];
-              itoa(zr,thiszr,10);
-              sprinklersystem.lcdPrint("clr",0,2,zoneName);
-              sprinklersystem.lcdPrint("na",12,2,thiszr);
-              sprinklersystem.lcdPrintConcat("min");
+        } else { // A zone is scheduled to run
+          if(!displayLock){
+            //check rain sensor
+            bool physicalRain = (sprinklersystem.getHasRainSensor() && sprinklersystem.getRainSensor() && sprinklersystem.readRainSensor() == 0);
+            bool owaRain = (useOWA && ((weatherId >= 200 && weatherId <= 531) || (weatherRainChance >= rainChanceCutoff)));
+            bool currentRainDelay = (physicalRain || owaRain);
+            if (currentRainDelay && !lastRainDelayState) {
+                logger("Rain Delay condition detected. Pausing/Skipping schedule.");
+            } else if (!currentRainDelay && lastRainDelayState) {
+                logger("Rain Delay condition cleared. Resuming schedule.");
             }
-            startZone(zoneName); // All the functions for zone open
-            displayMeter();
+            lastRainDelayState = currentRainDelay;
+            if (currentRainDelay && (!sprinklersystem.isInManualProgram())) {
+              //engaged AND NOT MANUAL MODE
+              sprinklersystem.lcdPrint("clr", 3, 2, "--Rain Delay--");
+              if (sprinklersystem.isActive()) {
+                closeZones("Rain Delay");
+              }
+            } else {
+              int zr = sprinklersystem.getZoneRemaining();
+              char thiszr[4];
+              itoa(zr, thiszr, 10);
+              sprinklersystem.lcdPrint("clr", 0, 2, zoneName);
+              sprinklersystem.lcdPrint("na", 12, 2, thiszr);
+              sprinklersystem.lcdPrintConcat("min");
+              startZone(zoneName); // All the functions for zone open
+              displayMeter();
+            }
           } 
         }
       } 
@@ -1150,15 +1404,23 @@ void rotaryLoop(void * parameter){
 	  if (rotaryEncoder.encoderChanged()){
       if (displayLock){
         int encval = rotaryEncoder.readEncoder();
-        if (encval < lastEncval){
-          if (programMenu >0){programMenu--;}
-          selectlevel--;
-        }
-        else {
-          if (programMenu >=0){programMenu++;}
-          selectlevel++;
-        }
+        bool up = (encval > lastEncval);
         lastEncval = encval;    
+
+        if (programMenu >= 0) {
+          int maxZones = sprinklersystem.getZoneCount();
+          if (up) {
+            if (programMenu < maxZones) programMenu++;
+          } else {
+            if (programMenu > 0) programMenu--;
+          }
+        } else {
+          if (up) {
+            if (selectlevel < 4) selectlevel++;
+          } else {
+            if (selectlevel > 0) selectlevel--;
+          }
+        }
         loadMenu(menulevel);       
       }  
 	  }
@@ -1170,6 +1432,7 @@ void rotaryLoop(void * parameter){
       if (selectlevel < 0){selectlevel =0;}
       if (!displayLock){
         displayLock=true;
+        lastEncval = rotaryEncoder.readEncoder();
         sprinklersystem.lcdPrint("init",7,0,"*MENU*");
       } 
       loadMenu(menulevel);        
@@ -1184,7 +1447,10 @@ void rotaryLoop(void * parameter){
 //-SYSTEM-[startup]------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void startup(){
-  acctMgr("inspect","admin","0");
+  Serial.print("\n\nESP32 Irigation System version ");
+  Serial.println(version);
+  Serial.print("2023-2026 Jordan Rubin\ndelorean1@gmail.com\n");
+
   if (SPIFFS.exists("/network.cnf")){  
      sprinklersystem.lcdPrint("clr",0,3,"NETWK: Loading");
      loadNetwork();
@@ -1193,9 +1459,33 @@ void startup(){
     sprinklersystem.lcdPrint("clr",0,3,"NETWK: No Config");   
      configNetwork();    
   }
+
   server.on("/getWifiList",  HTTP_GET, handleWifiList);
   server.on("/connectwWifi", HTTP_POST, handleWifiConnect); 
   server.on("/checkStatus",  HTTP_GET, handleCheckStatus);
+
+  serverRouting();
+  server.addHandler(&events);
+  server.begin();
+  delay(1000);
+
+  // Initialize OTA
+  ArduinoOTA.setHostname(deviceName);
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) type = "sketch";
+    else type = "filesystem";
+    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+    logger("OTA Update Start: " + type);
+  });
+  ArduinoOTA.onEnd([]() { logger("\nOTA Update End"); });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    // Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) { logger("OTA Error: " + String(error)); });
+  ArduinoOTA.begin();
+
+
   events.onConnect([](AsyncEventSourceClient *client){
     if(client->lastId()){
       Serial.printf("Client reconnected! Last message ID that it got is: %u\n", client->lastId());
@@ -1204,23 +1494,19 @@ void startup(){
     // and set reconnect delay to 1 second
     client->send("INIT", NULL, millis(), 10000);
   });
-  serverRouting();
-  server.addHandler(&events);
-  server.begin();
-  delay(2000);
+ 
   if (SPIFFS.exists("/system.cnf")){  
     loadConfig();
     delay(500);
     if (!SPIFFS.exists("/programmes.cnf")){  
-      sprinklersystem.lcdPrint("clearow",0,3,"CONFIG INCOMPLETE");
+      sprinklersystem.lcdPrint("clearrow",0,3,"CONFIG INCOMPLETE");
     } 
     else {
       sprinklersystem.lcdPrint("clr",0,3,"PROCESS COMPLETE");   
       delay(1000);
-      xTaskCreatePinnedToCore(mainPoll,"mainPolltask",1600,NULL,1,&mainPollhandle,1);     //132
-      xTaskCreatePinnedToCore(everyMinute,"everyminutetask",2600,NULL,1,&everyminutehandle,1); //???
-      xTaskCreatePinnedToCore(rotaryLoop,"rotaryLooptask",1800,NULL,1,&rotaryLoophandle,1);
-      everyMinute(nullptr);      
+      xTaskCreatePinnedToCore(mainPoll,"mainPolltask",4096,NULL,1,&mainPollhandle,1);
+      xTaskCreatePinnedToCore(everyMinute,"everyminutetask",12288,NULL,1,&everyminutehandle,1);
+      xTaskCreatePinnedToCore(rotaryLoop,"rotaryLooptask",4096,NULL,1,&rotaryLoophandle,1);
     }   
   }  
 }
@@ -1245,6 +1531,7 @@ void facdefMonitor(void * parameter){
         SPIFFS.remove("/accounts.cnf");
         SPIFFS.remove("/system.cnf");
         SPIFFS.remove("/programmes.cnf");
+        SPIFFS.remove("/log.txt");
         sprinklersystem.lcdClearRow(1);
         sprinklersystem.lcdClearRow(2);
         sprinklersystem.lcdClearRow(3);     
@@ -1273,7 +1560,6 @@ void setup() {
   Serial.begin(115200);
   TaskHandle_t facdefhandle = NULL;
   pinMode(FACDEFPIN, INPUT_PULLUP);
-//  pinMode(POWER_MONITOR_PIN, INPUT);
   sprinklersystem.begin();
   rotaryEncoder.setBoundaries(0,1000,false);
   rotaryEncoder.begin();
@@ -1286,87 +1572,10 @@ void setup() {
 //////////////////////////////////////////////////////////////////////////
 //-SYSTEM-[loop]--------------------STAYS EMPTY--------------------------]
 //////////////////////////////////////////////////////////////////////////
-void loop() {}
+void loop() {
+  ArduinoOTA.handle();
+  if (shouldRestart && (millis() - restartTime > 3000)){
+    ESP.restart();
+  }
+}
 //-----------------------------------------------------------------------]
-
-/* STORAGE
-
-//JsonObject obj = doc.as<JsonObject>();
-//for (JsonPair p : obj) {
-//auto t = p.key(); // is a JsonString
-//const char* s = p.value(); 
-//Serial.print(t.c_str());Serial.print("-->");Serial.println(s);
-//}
-    //Serial.println(cookie);
-    //List all parameters (Compatibility)
-    //int args = request->args();
-    //for(int i=0;i<args;i++){
-    //  Serial.printf("ARG[%s]: %s\n", request->argName(i).c_str(), request->arg(i).c_str());
-    //}
-
-///////////////
-//while (file.available()) {
-//  Serial.write(file.read());
-//}
-//file.close();
-//file = SPIFFS.open("/system.cnf","r");
-/////////////  
-
-
-//sprinklersystem.database("PUT","{\"items\":[{\"age\":4,\"weight\":28}]}");
-//char* apiKey = "b0zp3p9m_msKLg4XNsfU2A3UUbSAVY7fTQPSPbbYH";
-//char* detaID = "b0zp3p9m";
-//char* detaBaseName = "esp32Irrigate";
-//connectDetabase(detaID, detaBaseName, apiKey,true);
-//Serial.print(detaObj.getBaseURI());
-//Serial.print(detaObj.getDetaID());
-
-  //printResult(detaObj.putObject("{\"items\":[{\"age\":4}]}"));
-  //Serial.println();
-  
-  //printResult(detaObj.getObject("cba"));
-  //Serial.println();
- 
-  printResult(detaObj.deleteObject("abc"));
-  Serial.println();
-  printResult(detaObj.insertObject("{\"item\":{\"key\":\"cba\",\"age\":4}}"));
-  Serial.println();
-  printResult(detaObj.insertObject("{\"item\":{\"key\":\"abc\",\"age\":4}}"));
-  Serial.println();
-  printResult(detaObj.updateObject("{\"increment\":{\"age\":1}}", "abc"));
-  Serial.println();
-  printResult(detaObj.updateObject("{\"increment\":{\"age\":1}}", "bcs"));
-  Serial.println();
-  printResult(detaObj.query("{\"query\":[{\"age?lt\": 10}]}"));
-  Serial.println();
-
-
-
-//sprinklersystem.addDetabase(detaID,detaBaseName,apiKey);
-
-const char * tst = "{\"query\":[{\"meter": 666}]}";
-
-Serial.println(sprinklersystem.databaseQuery(tst));
-
-
-
-//dbtesting
-
-
-//sprinklersystem.database("QUERY","Age Query","{\"query\":[{\"value?gt\": 10}],\"limit\" : 50}");
-
-//DynamicJsonDocument receiving(1024);
-//deserializeJson(receiving, sprinklersystem.getDatabaseQuery("Age Query"));
-
-//JsonObject obj = receiving["items"][0].as<JsonObject>();
-//for (JsonPair p : obj) {
-//auto t = p.key(); // is a JsonString
-//const char* s = p.value(); 
-//Serial.print(t.c_str());Serial.print("-->");Serial.println("s");
-//}
-
-//const char * key = receiving["items"][0]["key"];
-//double meterval = receiving["items"][0]["value"];
-//Serial.println(key); Serial.print(" Meter is ");Serial.println(meterval);
-sprinklersystem.getDatabaseQuery("{\"query\":[{\"edtime?gt\": 1673305744,\"edtime?lt\": 1673392108}]}");
-*/

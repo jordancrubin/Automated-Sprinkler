@@ -2,56 +2,64 @@
   * scripts.js
   */ 
 var rsexist;
-var meterzoneval;
+var meterzoneval = 0;
 
-function detaQuery(dayval,type){
+function getHistoryData(dayval,type){
+  if (!document.getElementById("datatablesSimple")) return;
   let datatable = new simpleDatatables.DataTable("#datatablesSimple");
   var days;
   if (!dayval){days =document.getElementById('metricDays').value;}
   else {days = dayval;}
-  const start = Math.floor(Date.now() / 1000);
-  const lastmonth = start - (86400*days);
-  var myquery = '{"query":[{"edtime?gt":'+lastmonth+',"edtime?lt":'+start+'}]}';
   var xhr = new XMLHttpRequest();
   xhr.onreadystatechange = function() {
   if (this.readyState == 4 && this.status == 200) {
-    var data = JSON.parse(this.responseText);
-    if (data.items){  
+    var rawData = JSON.parse(this.responseText);
+    var items = [];
+    if (rawData) {
+        Object.keys(rawData).forEach(function(key) {
+            var item = rawData[key];
+            items.push(item);
+        });
+    }
+    items.reverse();
+    var data = { items: items };
+    if (data.items.length > 0){  
       if (type == 'G'){return data.items;}
       var zonedata = JSON.parse(sessionStorage.getItem("zonedata"));   
       let newerData =  {};
       newerData.data = [];
       for (let i = 0; i < data.items.length; ++i) {
-        var name;
-        for (let j = 0; j < zonedata.length; ++j) {        
-            if (zonedata[j].port == data.items[i].port){
-              name = zonedata[j].name;
-            break;
-          }
+        var name = "Unknown";
+        if (zonedata) {
+            for (let j = 0; j < zonedata.length; ++j) {        
+                if (zonedata[j].port == data.items[i].port){
+                name = zonedata[j].name;
+                break;
+                }
+            }
         }
         newerData.data[i] = [];
         var date = new Date((data.items[i].key * 1000));
         var time = convertMinsToHrsMins(data.items[i].duration);
         newerData.data[i][0] = date.toDateString();
-        newerData.data[i][1] = name;
-        newerData.data[i][2] = data.items[i].port;
-        newerData.data[i][3] = time;
-        newerData.data[i][4] = data.items[i].trigger;
-        newerData.data[i][5] = data.items[i].consumption;
+        newerData.data[i][1] = date.toLocaleTimeString();
+        newerData.data[i][2] = name;
+        newerData.data[i][3] = data.items[i].port;
+        newerData.data[i][4] = time;
+        newerData.data[i][5] = data.items[i].trigger ? "Manual" : "Auto";
+        if (data.items[i].note) {
+          newerData.data[i][5] = data.items[i].note;
+        }
+        newerData.data[i][6] = data.items[i].consumption;
       }
       datatable.insert(newerData);
     } 
     else {
-      alert("No Data Returned");
     }
    }
   };  
-  var dbcreds = JSON.parse(sessionStorage.getItem("dbcreds"));
-  var dburl = 'https://database.deta.sh/v1/'+dbcreds.i+'/'+dbcreds.n+'/query';
-  xhr.open("POST", dburl, true);
-  xhr.setRequestHeader("Content-type", "application/json");
-  xhr.setRequestHeader("X-API-Key",dbcreds.a);
-  xhr.send(myquery);  
+  xhr.open("GET", "getHistory?days="+days, true);
+  xhr.send();  
 }
 
 function convertMinsToHrsMins (minutes) {
@@ -111,6 +119,10 @@ function cancelRun() {
   var xhr = new XMLHttpRequest();
   xhr.onreadystatechange = function() {
     if (this.readyState == 4 && this.status == 200) {
+      // On successful cancellation, toggle the manual run button back
+      toggleManualRunButton(false);
+    }
+    if (this.readyState == 4 && this.status == 200) {
       var data = JSON.parse(this.responseText);
     }
   };  
@@ -119,15 +131,93 @@ function cancelRun() {
   xhr.send(); 
 }
 
+function confirmDeleteHistory() {
+  var myModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+  myModal.show();
+}
+
+function deleteHistory() {
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      location.reload();
+    }
+  };
+  xhr.open("POST", "deleteHistory", true);
+  xhr.send();
+}
+
+function exportToCSV() {
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var rawData = JSON.parse(this.responseText);
+      var items = [];
+      if (rawData) {
+          Object.keys(rawData).forEach(function(key) {
+              var item = rawData[key];
+              items.push(item);
+          });
+      }
+      items.reverse();
+      
+      var csv = "Date,Time,Name,Zone,Duration,Auto,Consumption\n";
+      var zonedata = JSON.parse(sessionStorage.getItem("zonedata"));
+      
+      items.forEach(function(row) {
+          var name = "Unknown";
+          if (zonedata) {
+            for (let j = 0; j < zonedata.length; ++j) {        
+                if (zonedata[j].port == row.port){
+                name = zonedata[j].name;
+                break;
+                }
+            }
+          }
+          var date = new Date((row.key * 1000));
+          var time = convertMinsToHrsMins(row.duration);
+          var trigger = row.trigger ? "Manual" : "Auto";
+          
+          if (name.indexOf(',') > -1) name = '"' + name + '"';
+
+          csv += date.toDateString() + ",";
+          csv += date.toLocaleTimeString() + ",";
+          csv += name + ",";
+          csv += row.port + ",";
+          csv += time + ",";
+          csv += trigger + ",";
+          csv += row.consumption + "\n";
+      });
+  
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      var link = document.createElement("a");
+      if (link.download !== undefined) {
+          var url = URL.createObjectURL(blob);
+          link.setAttribute("href", url);
+          link.setAttribute("download", "utilization.csv");
+          link.style.visibility = 'hidden';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+      }
+    }
+  };
+  xhr.open("GET", "getHistory?days=365", true);
+  xhr.send();
+}
+
 function cookieChk(){
   var testsession = getCookie("SESSIONID");
   if (testsession == 0){
-  }
+    window.location.href = "login.html";
+    console.log('cookieChk failed, redirecting to login.html');
+}
 }
 
 function getCookie(cname) {
   var name = cname + "=";
   var decodedCookie = decodeURIComponent(document.cookie);
+  console.log(decodedCookie);
   var ca = decodedCookie.split(';');
   for(var i = 0; i <ca.length; i++) {
     var c = ca[i];
@@ -161,19 +251,23 @@ function getCurrentProg(){
   xhr.send(); 
 }
 
-function getCreds(){
-  var xhr = new XMLHttpRequest();
-  xhr.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      var data = JSON.parse(this.responseText);
-      if (data.n){    
-        sessionStorage.setItem("dbcreds", JSON.stringify(data));             
-      }
-    }
-  };  
-  xhr.open("GET", "getCreds", true);
-  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-  xhr.send(); 
+function getLogHistory() {
+    var xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            var lines = this.responseText.split('\n').filter(Boolean); // Split by newline and remove empty lines
+            msgArray = lines.reverse(); // Newest first
+            if (msgArray.length > 100) {
+                msgArray = msgArray.slice(0, 100);
+            }
+            sessionStorage.setItem("logdata", JSON.stringify(msgArray));
+            if (document.getElementById("eventLog")) {
+                document.getElementById("eventLog").value = msgArray.join("\n");
+            }
+        }
+    };
+    xhr.open("GET", "/getLogs", true);
+    xhr.send();
 }
 
 function readMeter(){ 
@@ -224,16 +318,33 @@ function getURLParameter(sParam){
 }
 
 function LogoutDialogue() {
-  if (confirm("Are you sure you want to logout?")) {
-    const Http = new XMLHttpRequest();
-    const url='/logout';
-    Http.open("GET", url);
-    Http.send();
-    Http.onreadystatechange = (e) => {
-      window.location.href = "login.html";
-    }           
-  } 
-  else { }
+    // Show the modal
+    $('#logoutModal').modal('show');
+
+    // Handle the click on the confirm button, using .one() to prevent multiple bindings
+    $('#confirmLogoutBtn').one('click', function() {
+        $('#logoutModal').modal('hide');
+        const Http = new XMLHttpRequest();
+        const url = '/logout';
+        Http.open("GET", url);
+        Http.send();
+        Http.onreadystatechange = (e) => { window.location.href = "login.html"; }
+    });
+}
+
+function toggleManualRunButton(isRunning) {
+    const manualRunButton = document.getElementById("manualrunbutton").querySelector('button');
+    if (isRunning) {
+        manualRunButton.textContent = "Cancel Manual Run";
+        manualRunButton.classList.remove('btn-success');
+        manualRunButton.classList.add('btn-warning');
+        manualRunButton.onclick = function() { cancelRun(); };
+    } else {
+        manualRunButton.textContent = "Begin Run";
+        manualRunButton.classList.remove('btn-warning');
+        manualRunButton.classList.add('btn-success');
+        manualRunButton.onclick = function() { submitManualRun(); };
+    }
 }
 
 function manualRunListChange() {
@@ -248,86 +359,78 @@ function manualRunListChange() {
   }
 }
 
+function waitForReboot(url){
+  setTimeout(function(){
+    var interval = setInterval(function(){
+      var xhr = new XMLHttpRequest();
+      xhr.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+           clearInterval(interval);
+           window.location.href = url;
+        }
+      };
+      xhr.open("GET", url + "?t=" + new Date().getTime(), true);
+      xhr.timeout = 1000;
+      xhr.send();
+    }, 3000);
+  }, 5000);
+}
+
 function printProgrammes(){
   var content ='';
   for (let i = 0; i < 3; i++) {
     var letter = 'A';
     if(i==1){letter='B';}
     if(i==2){letter='C';}
-    var subContent = 
-    '<div class="row">'+
-    '<div class="col-xs-4 col-md-6">'+
-    '  <div class="alert alert-info" id="pwinfo">'+
-    '    PROGRAMME ['+letter+']'+
-    '  </div>'+
-    '</div>'+
-  '</div>'+                         
-  '<div class="row">'+
-  '<div class="col-xs-4 col-md-3">'+
-      '<div class="form-group">'+
-       '<!-- <form>-->'+
-       '<div class="form-group">'+
-       '<label for="starttime'+letter+'">Start Time 0000-2359'+
-       '<input type="text" class="form-control" id="st'+letter+'" name="st'+letter+'" placeholder="1800">'+
-         '</label>'+
-       '<label class="radio-inline">'+   
-         '<div class="weekDays-selector">'+
-           '&nbsp;<input type="checkbox" id="'+letter+'-1" class="weekday" /> '+
-           '<label for="weekday-mon">M</label> '+
-           '<input type="checkbox" id="'+letter+'-2" class="weekday" /> '+
-           '<label for="weekday-tue">T</label> '+
-           '<input type="checkbox" id="'+letter+'-3" class="weekday" /> '+
-           '<label for="weekday-wed">W</label> '+
-           '<input type="checkbox" id="'+letter+'-4" class="weekday" /> '+
-           '<label for="weekday-thu">T</label> '+
-           '<input type="checkbox" id="'+letter+'-5" class="weekday" /> '+
-           '<label for="weekday-fri">F</label> '+
-           '<input type="checkbox" id="'+letter+'-6" class="weekday" /> '+
-           '<label for="weekday-sat">S</label> '+
-           '<input type="checkbox" id="'+letter+'-7" class="weekday" /> '+
-           '<label for="weekday-sun">S</label> '+
-         '</div>'+  
-       '</label>'+
-   '</div>'+
-   '</div>'+
-   '</div>'+
-'</div>'+
-'</div>'+
-'</br></br>'+
-'<div class="row">'+
-'<div class="col-xs-4 col-md-6">'+
-'<div class="alert alert-info">'+
-' Zone Usage'+
-'</div>'+
-'</div>'+
-'</div>'+
-'<div class="row">'+
-'<div class="col-xs-4 col-md-6">'+
-   '<div class="form-group">'+
-     '<form>'+
-       '<div class="form-group">'+
-           '<table id="myTable" class=" table order-list'+letter+'">'+
-               '<thead>'+
-                   '<tr>'+
-                       '<td>Name</td>'+
-                       '<td>Duration</td>'+
-                   '</tr>'+
-               '</thead>'+
-               '<tbody>'+
-               '</tbody>'+
-               '<tfoot>'+
-                   '<tr>'+
-                       '<td>'+    
-                           '</br>'+
-                       '</td>'+
-                   '</tr>'+
-                   '<tr>'+
-                   '</tr>'+
-               '</tfoot>'+
-           '</table>'+
-       '</div>'+
-    '</div>'+  
-'</div>';
+    var subContent = `
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="fas fa-clock me-1"></i> Programme ${letter}
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="form-floating mb-3">
+                        <input type="text" class="form-control" id="st${letter}" name="st${letter}" placeholder="1800">
+                        <label for="st${letter}">Start Time (HHMM)</label>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    <label class="mb-2">Active Days</label><br>
+                    <div class="btn-group" role="group">
+                        <input type="checkbox" class="btn-check" id="${letter}-1" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="${letter}-1">Mon</label>
+                        <input type="checkbox" class="btn-check" id="${letter}-2" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="${letter}-2">Tue</label>
+                        <input type="checkbox" class="btn-check" id="${letter}-3" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="${letter}-3">Wed</label>
+                        <input type="checkbox" class="btn-check" id="${letter}-4" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="${letter}-4">Thu</label>
+                        <input type="checkbox" class="btn-check" id="${letter}-5" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="${letter}-5">Fri</label>
+                        <input type="checkbox" class="btn-check" id="${letter}-6" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="${letter}-6">Sat</label>
+                        <input type="checkbox" class="btn-check" id="${letter}-7" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="${letter}-7">Sun</label>
+                    </div>
+                </div>
+            </div>
+            <hr>
+            <h6 class="card-subtitle mb-2 text-muted">Zone Durations (Minutes)</h6>
+            <div class="table-responsive">
+                <table class="table table-striped table-hover order-list${letter}">
+                    <thead>
+                        <tr>
+                            <th>Zone Name</th>
+                            <th style="width: 150px;">Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>`;
   content = content+subContent;
   }  
   document.getElementById("programmeListing").innerHTML = content;
@@ -352,6 +455,21 @@ function rainSenseChange(){
   xhr.send("event=rainsensechange&value="+rainsenseval); 
 }
 
+function owaChange(){
+  var sel = document.getElementById("owaselector");
+  var val = sel.options[sel.selectedIndex].value;
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var data = JSON.parse(this.responseText);
+      if (data.s != "0") alert("Update error, try again...");
+    }
+  };  
+  xhr.open("POST", "updateConfig", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send("event=owachange&value="+val); 
+}
+
 function submitManualRun() {
   var dropdown = document.getElementById('manualrunlist');
   var value = dropdown.options[dropdown.selectedIndex].value;
@@ -359,6 +477,7 @@ function submitManualRun() {
   xhr.onreadystatechange = function() {
     if (this.readyState == 4 && this.status == 200) {
       var data = JSON.parse(this.responseText);
+      toggleManualRunButton(true); // Toggle button to "Cancel"
     }
   };  
   xhr.open("POST", "sendManual", true);
@@ -431,6 +550,7 @@ function updateStatus(type){
     var state = document.getElementById("state");
     var stateinfo = document.getElementById("stateInfo");
     var raininfo = document.getElementById("rainState");
+    var celement = document.getElementById("cancelbutton");
   }
   var xhr = new XMLHttpRequest();
   xhr.onreadystatechange = function() {
@@ -443,13 +563,6 @@ function updateStatus(type){
             return 0;
         }
       }
-      valvestate = sessionStorage.getItem("valvestate");
-      if (valvestate != 'CLOSED'){
-        if (data.valve == 'CLOSED'){
-          setTimeout(()=> { detaQuery(30,'T'); console.log("updated!"); }, 10000);
-        }
-      }
-      sessionStorage.setItem("valvestate", data.valve);
       if(rsexist){
         var sel = document.getElementById("rainsenssel");
         var opt = sel.options[sel.selectedIndex];
@@ -464,6 +577,32 @@ function updateStatus(type){
         }
         else {raininfo.innerHTML="";}
       }
+      if (document.getElementById("owaselector")) {
+        var owaSel = document.getElementById("owaselector");
+        var owaLbl = document.getElementById("owalabel");
+        var owaContainer = document.getElementById("owa_container");
+        if (data.owa_setup) {
+            if (owaContainer) owaContainer.style.display = "";
+            if (owaLbl) owaLbl.style.color = "green";
+            owaSel.disabled = false;
+            owaSel.value = data.use_owa ? "1" : "0";
+        } else {
+            if (owaContainer) owaContainer.style.display = "none";
+            if (owaLbl) owaLbl.style.color = "red";
+            owaSel.disabled = true;
+            owaSel.value = "0";
+        }
+      }
+      if (data.w_desc) {
+        document.getElementById("weatherTemp").innerHTML = data.w_temp.toFixed(1) + "&deg;C";
+        document.getElementById("weatherDesc").innerHTML = data.w_desc;
+        document.getElementById("weatherPop").innerHTML = "Rain Chance (24h): " + data.w_pop.toFixed(0) + "%";
+        if (data.w_icon) {
+            var iconImg = document.getElementById("weatherIcon");
+            iconImg.src = "http://openweathermap.org/img/wn/" + data.w_icon + "@2x.png";
+            iconImg.style.display = "inline";
+        }
+      }
       if (data.valve == 'CLOSED'){
         valveState.innerHTML="Valve is <font color='green'>Closed</font>";
       }
@@ -476,6 +615,13 @@ function updateStatus(type){
       else{
         valveState.innerHTML="Valve Status <font color='blue'>Unknown</font>";
       } 
+      if (document.getElementById("manualRunCard")) {
+        if (data.state == "0") {
+            document.getElementById("manualRunCard").style.display = "none";
+        } else {
+            document.getElementById("manualRunCard").style.display = "block";
+        }
+      }
       if (data.state == "0"){
         celement.style.display = "none";
         state.innerHTML="Programme is disabled.....";
@@ -499,7 +645,11 @@ function updateStatus(type){
           stateinfo.innerHTML= hours+" hours "+minutes+" minutes";
         }
         else {
-          stateinfo.innerHTML= data.info+" minutes";
+          if (data.info == 1) {
+            stateinfo.innerHTML= data.info+" minute";
+          } else {
+            stateinfo.innerHTML= data.info+" minutes";
+          }
         }
       }
       else if(data.state == "4"){
@@ -509,6 +659,9 @@ function updateStatus(type){
       }
       else if(data.state == "5"){
         celement.style.display = "block";
+        if (data.info > 0) { // Check if a manual run is active
+            toggleManualRunButton(true);
+        }
         var minutes = data.info;
         var zone = data.zone;
         if (minutes >1){
@@ -520,9 +673,8 @@ function updateStatus(type){
           stateinfo.innerHTML= "Consumption <span id=\"consumeval\">"+meterzoneval+"</span>/min";
       }
       else if(data.state == "6"){
-        var zone = data.zone;
         celement.style.display = "block";
-        state.innerHTML="Zone "+zone+" *Rain Delay*";
+        state.innerHTML="<span style='color: blue; font-weight: bold;'>RAIN DELAY</span>";
         stateinfo.innerHTML= "";
       }
         else {
@@ -538,26 +690,30 @@ function updateStatus(type){
 function updateZoneList() {
   var dropdown = document.getElementById('manualrunlist');     
     var option;
-    dropdown.length = 0;
-    defaultOption = document.createElement('option');
-    defaultOption.text = "Refreshing Configured Zones";
-    dropdown.add(defaultOption);
+    if (dropdown) {
+      dropdown.length = 0;
+      defaultOption = document.createElement('option');
+      defaultOption.text = "Refreshing Configured Zones";
+      dropdown.add(defaultOption);
+    }
     var xhr = new XMLHttpRequest();
     xhr.onreadystatechange = function() {
       if (this.readyState == 4 && this.status == 200) {    
         var data = JSON.parse(this.responseText);
         sessionStorage.setItem("zonedata", JSON.stringify(data)); 
-        dropdown.length = 0;
-        defaultOption = document.createElement('option');
-        defaultOption.text = 'Choose a zone.....';
-        defaultOption.value = '';
-        dropdown.add(defaultOption);
-        dropdown.selectedIndex = 0;  
-        for (let i = 0; i < data.length; i++) {       
-          option = document.createElement('option');      
-          option.text = data[i].val+" - "+data[i].name;
-          option.value = data[i].val;
-          dropdown.add(option);
+        if (dropdown) {
+          dropdown.length = 0;
+          defaultOption = document.createElement('option');
+          defaultOption.text = 'Choose a zone.....';
+          defaultOption.value = '';
+          dropdown.add(defaultOption);
+          dropdown.selectedIndex = 0;  
+          for (let i = 0; i < data.length; i++) {       
+            option = document.createElement('option');      
+            option.text = data[i].val+" - "+data[i].name;
+            option.value = data[i].val;
+            dropdown.add(option);
+          }
         }
       }
     };  
@@ -590,6 +746,14 @@ const content = `
 <a class="nav-link" href="leakcheck.html">
     <div class="sb-nav-link-icon"><i class="fa fa-bath"></i></div>
     Leak Test
+</a>
+<a class="nav-link" href="consumption.html">
+    <div class="sb-nav-link-icon"><i class="fas fa-tint"></i></div>
+    Consumption
+</a>
+<a class="nav-link" href="utilization.html">
+    <div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>
+    Utilization
 </a>
 </div>
 <div class="sb-sidenav-footer">
@@ -643,8 +807,10 @@ source.addEventListener('meter', function(e) {
 source.addEventListener('stats', function(e) {
   console.log(e);
   if(e.data ==1){
-    console.log("reloading stats...");
-    location.reload();
+    if (document.getElementById("datatablesSimple")) {
+      console.log("reloading stats...");
+      location.reload();
+    }
    };
 }, false);
 
@@ -655,7 +821,11 @@ source.addEventListener('metrics', function(e) {
 
 source.addEventListener('message', function(e) {
   if (sessionStorage.getItem("logdata")){
-    msgArray = JSON.parse(sessionStorage.getItem("logdata"));
+    try {
+      msgArray = JSON.parse(sessionStorage.getItem("logdata"));
+    } catch (err) {
+      msgArray = [];
+    }
   }
   console.log(e);
   var thisid = e.lastEventId;
@@ -665,15 +835,13 @@ source.addEventListener('message', function(e) {
   if (e.data != 'INIT'){
     if (msgArray.length > 0){msgArray.unshift(e.data);}
     else {msgArray.push(e.data);}
-    if (msgArray.length == 20){
+    if (msgArray.length > 100){
       msgArray.pop();
     }
     sessionStorage.setItem("logdata", JSON.stringify(msgArray));
     console.log(msgArray);
   }
 
-  var storedArray = JSON.parse(sessionStorage.getItem("logdata"));//no brackets
-  console.log(storedArray);
   if (document.getElementById("eventLog")){
     var textarea = document.getElementById("eventLog");
     textarea.value = msgArray.join("\n");
