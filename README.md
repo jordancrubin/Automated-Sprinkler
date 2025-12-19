@@ -2,6 +2,8 @@
 
 A comprehensive, web-based irrigation controller for the ESP32, featuring automated scheduling, weather-based rain delays, water usage monitoring, and cloud integration via Firebase.
 
+See the video Series here at https://www.youtube.com/playlist?list=PLK_zQ6_j4TF2hAYxrCdtLyZ5UvhFppnFG
+
 ## Features
 
 *   **Web-Based Dashboard:** Responsive UI for status monitoring, manual controls, and configuration.
